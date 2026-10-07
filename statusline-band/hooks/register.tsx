@@ -66,7 +66,6 @@ async function afterModelCommand($: EngineInterface, output: string | undefined,
   $.ui.invalidate('ui.render')
 }
 
-// Opens Claude Code's own /model picker, as typing /model does; it runs once the session is idle.
 // Copies the session's folder to the clipboard of the surface clicked, and says so in a toast.
 async function copyPath($: EngineInterface, surface: RenderSurface): Promise<void> {
   const path = await $.session.cwd()
@@ -85,6 +84,7 @@ async function openContext($: EngineInterface): Promise<void> {
   }
 }
 
+// Opens Claude Code's own /model picker, as typing /model does; it runs once the session is idle.
 async function openModelPicker($: EngineInterface): Promise<void> {
   try {
     const before = await $.session.model()
@@ -156,7 +156,7 @@ export const register: Register = on => {
     await refreshGit()
     $.clock.every(5000, () => void Promise.all([refreshGit(), checkAlerts()]).catch(() => {}))
 
-    // Duration, countdowns and the running tool's time move with the clock.
+    // The reset countdowns and the running tool's time move with the clock.
     $.clock.every(1000, () => $.ui.invalidate('ui.render'))
 
     return result
@@ -188,7 +188,8 @@ export const register: Register = on => {
     return result
   })
 
-  // Clicks on the band's Clients: the model text opens the /model picker, the folder copies its path.
+  // Clicks on the band's Clients: the model text opens the /model picker, ctx opens /context,
+  // the folder copies its path.
   on('ui.message', ($, e, next) => {
     const data = e.data as { open?: unknown; action?: unknown } | null
     if (e.element === 'model-button' && data?.open === 'model') void openModelPicker($)
