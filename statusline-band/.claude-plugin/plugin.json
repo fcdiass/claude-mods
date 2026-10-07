@@ -1,0 +1,7 @@
+{
+  "name": "statusline-band",
+  "version": "0.12.2",
+  "description": "Port of statusline.py: model, git, cwd, context, cost, duration and 5h/7d rate limits in a colored band above the prompt",
+  "author": { "name": "Francisco Corrêa Dias", "email": "fcdiass@gmail.com" },
+  "types": "./types/index.d.ts"
+}

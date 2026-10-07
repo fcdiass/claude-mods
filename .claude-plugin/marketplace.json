@@ -1,0 +1,8 @@
+{
+  "name": "fcdiass-mods",
+  "description": "Personal Claude Code mods",
+  "owner": { "name": "Francisco Corrêa Dias", "email": "fcdiass@gmail.com" },
+  "plugins": [
+    { "name": "statusline-band", "source": "./statusline-band", "description": "Colored status band above the prompt (port of statusline.py)" }
+  ]
+}
