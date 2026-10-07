@@ -3,7 +3,7 @@ import type { EngineInterface, Register, RenderSurface, SessionRateLimit } from 
 
 import type { GitInfo, RunningTool } from '../types'
 import { LONG_TOOL_MS, climb, gauges } from './alerts'
-import { FIVE_HOUR_MS, SEVEN_DAY_MS, buildLines, costAltSegs, fmtDuration, projectByPace } from './format'
+import { FIVE_HOUR_MS, SEVEN_DAY_MS, buildLines, contextAltSegs, costAltSegs, fmtDuration, projectByPace } from './format'
 import type { Press, RateLimit, Seg } from './format'
 import { effortFromCommand, effortFromModelCommand } from './effort'
 
@@ -299,7 +299,13 @@ export const register: Register = on => {
           const swap =
             press === 'folder'
               ? { key: 'folder-button', trigger: 'hover' as const, alt: [{ text: `📂 ${cwd}`, color: 'white', underline: true }], action: 'copy-path' }
-              : { key: 'usage-button', trigger: 'click' as const, alt: costAltSegs(usage.cost?.usd) }
+              : press === 'usage'
+                ? { key: 'usage-button', trigger: 'click' as const, alt: costAltSegs(usage.cost?.usd) }
+                : {
+                    key: 'context-button',
+                    trigger: 'click' as const,
+                    alt: contextAltSegs(usage.context.percent, usage.context.tokens, usage.context.window),
+                  }
           return (
             <Client
               key={swap.key}

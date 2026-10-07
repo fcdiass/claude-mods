@@ -1,8 +1,8 @@
 // Port of ~/.claude/statusline.py, plus the mod-only figures: builds the two lines as colored segments.
 
 // `press` makes the segment interactive: `model` opens the /model picker, `folder` shows and
-// copies the path, `usage` shows the cost under the pointer.
-export type Press = 'model' | 'folder' | 'usage'
+// copies the path, `usage` and `context` swap to the cost and the token count on a click.
+export type Press = 'model' | 'folder' | 'usage' | 'context'
 export type Seg = { text: string; color?: string; bold?: boolean; dim?: boolean; underline?: boolean; press?: Press }
 
 export const C = {
@@ -189,6 +189,24 @@ export function costSegs(costUsd: number | undefined): Seg[] {
 }
 
 // On a subscription, a click on the windows swaps them for what the session would cost on the API.
+function contextColor(pct: number): string {
+  return pct >= 85 ? C.RD : pct >= 70 ? C.YL : C.GR
+}
+
+// 950 -> 950, 358700 -> 358.7k, 200000 -> 200k, 1000000 -> 1M.
+export function fmtTokens(n: number): string {
+  const trim = (x: number) => x.toFixed(1).replace(/\.0$/, '')
+  if (n >= 1_000_000) return `${trim(n / 1_000_000)}M`
+  if (n >= 1_000) return `${trim(n / 1_000)}k`
+  return String(Math.round(n))
+}
+
+// A click on the context bar swaps it for the tokens in use out of the window: ctx 358.7k / 1M.
+export function contextAltSegs(percent: number | undefined, tokens: number | undefined, window: number): Seg[] {
+  const color = contextColor(Math.trunc(percent ?? 0))
+  return [{ text: 'ctx ' }, { text: `${fmtTokens(tokens ?? 0)} / ${fmtTokens(window)}`, color }]
+}
+
 export function costAltSegs(costUsd: number | undefined): Seg[] {
   return [{ text: 'cost ≈ ' }, { text: `$${(costUsd ?? 0).toFixed(2)}`, color: C.YL }, { text: ' API-equivalent', dim: true }]
 }
@@ -226,13 +244,13 @@ export function buildLines(s: StatusInput): [Seg[], Seg[]] {
   ]
 
   const pct = Math.trunc(s.contextPercent ?? 0)
-  const ctxColor = pct >= 85 ? C.RD : pct >= 70 ? C.YL : C.GR
+  const ctxColor = contextColor(pct)
 
   const line2: Seg[] = [
-    { text: 'ctx ' },
-    { text: bar(pct), color: ctxColor },
-    { text: ' ' },
-    { text: `${pct}%`, color: ctxColor },
+    { text: 'ctx ', press: 'context' },
+    { text: bar(pct), color: ctxColor, press: 'context' },
+    { text: ' ', press: 'context' },
+    { text: `${pct}%`, color: ctxColor, press: 'context' },
     SEP,
     ...(s.hasWindows
       ? [

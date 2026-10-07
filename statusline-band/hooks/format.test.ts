@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { C, bar, buildLines, costAltSegs, fmtDuration, fmtReset, FIVE_HOUR_MS, SEVEN_DAY_MS, modelName, projectByPace, rateLimitColor } from './format'
+import { C, bar, buildLines, contextAltSegs, costAltSegs, fmtTokens, fmtDuration, fmtReset, FIVE_HOUR_MS, SEVEN_DAY_MS, modelName, projectByPace, rateLimitColor } from './format'
 
 const text = (segs: { text: string }[]) => segs.map(s => s.text).join('')
 
@@ -138,4 +138,17 @@ test('outside a repository the folder name stands alone, with no full path', asy
   const now = Date.parse('2026-10-07T12:00:00Z')
   const [l1] = buildLines({ model: 'claude-opus-5-5', effort: 'medium', cwd: 'D:/repos/TEST/claude-mods', git: null, hasWindows: false, nowMs: now })
   expect(text(l1)).toBe('◆ Opus 5.5 · medium │ 📁 claude-mods')
+})
+
+test('token counts read short', async () => {
+  expect(fmtTokens(950)).toBe('950')
+  expect(fmtTokens(358_700)).toBe('358.7k')
+  expect(fmtTokens(200_000)).toBe('200k')
+  expect(fmtTokens(1_000_000)).toBe('1M')
+  expect(fmtTokens(1_250_000)).toBe('1.3M')
+})
+
+test('the context bar swaps for the tokens in use, in its color', async () => {
+  expect(text(contextAltSegs(36, 358_700, 1_000_000))).toBe('ctx 358.7k / 1M')
+  expect(contextAltSegs(90, 180_000, 200_000)[1]?.color).toBe(C.RD)
 })

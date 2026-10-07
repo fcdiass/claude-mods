@@ -22,7 +22,7 @@ function engine(on: On, isCopied = true, rateLimits: typeof WINDOWS = []) {
   on('session.model', () => ({ value: 'claude-opus-5-5' }))
   on('session.cwd', () => ({ value: CWD }))
   on('session.usage', () => ({
-    value: { startedAt: NOW, context: { tokens: 0, window: 200_000, percent: 0 }, rateLimits, cost: { usd: 22.06 } },
+    value: { startedAt: NOW, context: { tokens: 358_700, window: 1_000_000, percent: 36 }, rateLimits, cost: { usd: 22.06 } },
   }))
   on('ui.copy', ($, e) => {
     copied.push(e.text)
@@ -93,4 +93,19 @@ test('an API account shows the cost and no windows', async ($, on) => {
   const band = await $.ui.mount({ plugin: 'statusline-band', surface: 'terminal', ...BAND })
   expect(await band.find({ key: 'usage-button' })).toBeUndefined()
   expect(JSON.stringify(await band.drawn())).toContain('$22.06')
+})
+
+test('a click on the context bar swaps the percentage for tokens, another swaps back', async ($, on) => {
+  engine(on)
+  const band = await $.ui.mount({ plugin: 'statusline-band', surface: 'terminal', ...BAND })
+  const ctxText = async () => JSON.stringify(await band.drawn({ in: 'context-button' }))
+  const click = async () => {
+    await band.pointer({ type: 'down', x: 1, y: 0, button: 'left', in: 'context-button' })
+    await band.pointer({ type: 'up', x: 1, y: 0, button: 'left', in: 'context-button' })
+  }
+  expect(await ctxText()).toContain('36%')
+  await click()
+  expect(await ctxText()).toContain('358.7k / 1M')
+  await click()
+  expect(await ctxText()).toContain('36%')
 })
