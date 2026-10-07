@@ -11,7 +11,7 @@ test('durations match statusline.py', async () => {
   expect(fmtDuration(3_720_000)).toBe('1h02m')
 })
 
-test('context bar fills by tenths', async () => {
+test('the context bar is as wide as the usage bars', async () => {
   expect(bar(21)).toBe('██░░░░░░░░')
   expect(bar(100)).toBe('██████████')
 })
@@ -46,7 +46,7 @@ test('builds both lines', async () => {
   expect(text(l2)).toContain('ctx ███████░░░ 72%')
   expect(text(l2)).not.toContain('dur')
   expect(text(l2)).toContain('34% ↺ 2h00m')
-  expect(text(l2)).toContain('7d ░░░░░░░░░░░░░░ --')
+  expect(text(l2)).toContain('7d ░░░░░░░░░░ --')
 })
 
 test('a subscription shows the windows, not the cost; an API account the cost, not the windows', async () => {
