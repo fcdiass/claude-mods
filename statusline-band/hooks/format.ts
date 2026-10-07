@@ -121,10 +121,14 @@ export function rateLimitColor(usedPct: number | undefined, elapsed: number | un
   return C.BL
 }
 
+// The projection warns only when 100% comes this soon, as a fraction of the time left to the reset.
+export const PROJECTION_WARN_FRACTION = 0.6
+
 /**
  * Time from now until the window reaches 100% at its average rate so far (a rule of three:
  * used% over the time elapsed since the window opened), or undefined when at that pace it
- * would not get there before its reset, or nothing is used yet.
+ * would not get there within PROJECTION_WARN_FRACTION of the time left to the reset, or
+ * nothing is used yet.
  */
 export function projectByPace(
   usedPct: number | undefined,
@@ -135,8 +139,8 @@ export function projectByPace(
   if (usedPct === undefined || usedPct <= 0 || usedPct >= 100 || resetsAtMs === undefined) return undefined
   const elapsedMs = nowMs - (resetsAtMs - windowMs)
   if (elapsedMs <= 0 || nowMs >= resetsAtMs) return undefined
-  const fullAt = nowMs + (elapsedMs * (100 - usedPct)) / usedPct
-  return fullAt < resetsAtMs ? fullAt - nowMs : undefined
+  const etaMs = (elapsedMs * (100 - usedPct)) / usedPct
+  return etaMs < PROJECTION_WARN_FRACTION * (resetsAtMs - nowMs) ? etaMs : undefined
 }
 
 export function rateLimitBar(usedPct: number | undefined, elapsed: number | undefined, color: string, width = BAR_WIDTH): Seg[] {

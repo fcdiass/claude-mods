@@ -72,6 +72,16 @@ test('projection by pace: ahead of the time elapsed reaches 100% before the rese
   expect(projectByPace(40, now + 4 * 3600_000, FIVE_HOUR_MS, now)).toBe(90 * 60_000)
 })
 
+test('projection by pace: warns only when 100% comes within 60% of the time left to the reset', async () => {
+  const now = Date.parse('2026-10-07T12:00:00Z')
+  // 1h into the 5h window, 4h left: the warning needs 100% within 0.6 x 240 = 144 min.
+  // 30% used: 140 min to 100%, inside the limit.
+  expect(projectByPace(30, now + 4 * 3600_000, FIVE_HOUR_MS, now)).toBe(140 * 60_000)
+  // 29% used: ~147 min, just past it; 25% used: 180 min, ahead of pace but well past it.
+  expect(projectByPace(29, now + 4 * 3600_000, FIVE_HOUR_MS, now)).toBeUndefined()
+  expect(projectByPace(25, now + 4 * 3600_000, FIVE_HOUR_MS, now)).toBeUndefined()
+})
+
 test('projection by pace: none at or behind the time elapsed, or with nothing used', async () => {
   const now = Date.parse('2026-10-07T12:00:00Z')
   // The screenshot: 5h at 17% with 4h05m left (55 min in, 18%); 7d at 22% with 4d10h left (37% in).
