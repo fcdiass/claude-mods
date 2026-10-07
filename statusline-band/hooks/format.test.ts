@@ -149,6 +149,14 @@ test('token counts read short', async () => {
 })
 
 test('the context bar swaps for the tokens in use, in its color', async () => {
-  expect(text(contextAltSegs(36, 358_700, 1_000_000))).toBe('ctx 358.7k / 1M')
+  expect(text(contextAltSegs(36, 358_700, 1_000_000))).toBe(' 358.7k / 1M')
   expect(contextAltSegs(90, 180_000, 200_000)[1]?.color).toBe(C.RD)
+})
+
+test('the context percentage rounds as /context does', async () => {
+  const now = Date.parse('2026-10-07T12:00:00Z')
+  const base = { model: 'm', cwd: '/x', git: null, hasWindows: false, nowMs: now }
+  // 719.5k of 1M is 71.95%: /context shows 72%.
+  expect(text(buildLines({ ...base, contextPercent: 71.95 })[1])).toContain(' 72%')
+  expect(text(buildLines({ ...base, contextPercent: 71.4 })[1])).toContain(' 71%')
 })

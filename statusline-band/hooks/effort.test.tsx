@@ -118,3 +118,15 @@ test('on the desktop the model text is plain, since its /model opens no picker',
   expect(await band.find({ type: 'Text', text: /Opus 5\.5/ })).toBeDefined()
   expect(ran).toEqual([])
 })
+
+test('"ctx" inverts under the pointer and a click runs /context', async ($, on) => {
+  const { ran } = engine(on)
+  const band = await $.ui.mount({ plugin: 'statusline-band', surface: 'terminal', ...BAND })
+  expect(await band.drawn({ in: 'context-label' })).toMatchObject({ type: 'Text', props: { inverse: false } })
+  await band.pointer({ type: 'enter', x: 0, y: 0, in: 'context-label' })
+  expect(await band.drawn({ in: 'context-label' })).toMatchObject({ props: { inverse: true } })
+
+  await band.pointer({ type: 'down', x: 1, y: 0, button: 'left', in: 'context-label' })
+  await band.pointer({ type: 'up', x: 1, y: 0, button: 'left', in: 'context-label' })
+  expect(ran).toEqual(['/context'])
+})

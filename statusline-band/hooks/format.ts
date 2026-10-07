@@ -1,8 +1,8 @@
 // Port of ~/.claude/statusline.py, plus the mod-only figures: builds the two lines as colored segments.
 
-// `press` makes the segment interactive: `model` opens the /model picker, `folder` shows and
+// `press` makes the segment interactive: `model` and `context-label` open /model and /context, `folder` shows and
 // copies the path, `usage` and `context` swap to the cost and the token count on a click.
-export type Press = 'model' | 'folder' | 'usage' | 'context'
+export type Press = 'model' | 'folder' | 'usage' | 'context' | 'context-label'
 export type Seg = { text: string; color?: string; bold?: boolean; dim?: boolean; underline?: boolean; press?: Press }
 
 export const C = {
@@ -201,10 +201,10 @@ export function fmtTokens(n: number): string {
   return String(Math.round(n))
 }
 
-// A click on the context bar swaps it for the tokens in use out of the window: ctx 358.7k / 1M.
+// A click on the context bar swaps it for the tokens in use out of the window: 358.7k / 1M.
 export function contextAltSegs(percent: number | undefined, tokens: number | undefined, window: number): Seg[] {
-  const color = contextColor(Math.trunc(percent ?? 0))
-  return [{ text: 'ctx ' }, { text: `${fmtTokens(tokens ?? 0)} / ${fmtTokens(window)}`, color }]
+  const color = contextColor(Math.round(percent ?? 0))
+  return [{ text: ' ' }, { text: `${fmtTokens(tokens ?? 0)} / ${fmtTokens(window)}`, color }]
 }
 
 export function costAltSegs(costUsd: number | undefined): Seg[] {
@@ -243,11 +243,13 @@ export function buildLines(s: StatusInput): [Seg[], Seg[]] {
     ...runningSegs,
   ]
 
-  const pct = Math.trunc(s.contextPercent ?? 0)
+  // Rounded, as /context rounds it, so both read the same figure.
+  const pct = Math.round(s.contextPercent ?? 0)
   const ctxColor = contextColor(pct)
 
   const line2: Seg[] = [
-    { text: 'ctx ', press: 'context' },
+    { text: 'ctx', press: 'context-label' },
+    { text: ' ', press: 'context' },
     { text: bar(pct), color: ctxColor, press: 'context' },
     { text: ' ', press: 'context' },
     { text: `${pct}%`, color: ctxColor, press: 'context' },

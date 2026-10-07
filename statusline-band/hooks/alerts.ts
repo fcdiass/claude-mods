@@ -35,7 +35,7 @@ function windowGauges(key: string, label: string, rl: RateLimit | undefined, win
 }
 
 export function gauges(s: AlertInput): Record<string, Gauge> {
-  const ctx = Math.trunc(s.contextPercent ?? 0)
+  const ctx = Math.round(s.contextPercent ?? 0)
   return {
     context: {
       level: ctx >= 85 ? 2 : ctx >= 70 ? 1 : 0,

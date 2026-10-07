@@ -76,6 +76,15 @@ async function copyPath($: EngineInterface, surface: RenderSurface): Promise<voi
   })
 }
 
+// Shows Claude Code's own /context breakdown, as typing /context does.
+async function openContext($: EngineInterface): Promise<void> {
+  try {
+    await $.command.run({ command: 'context' })
+  } catch (error) {
+    $.ui.toast(`/context failed: ${String(error)}`, { timeoutMs: 8000 })
+  }
+}
+
 async function openModelPicker($: EngineInterface): Promise<void> {
   try {
     const before = await $.session.model()
@@ -182,6 +191,7 @@ export const register: Register = on => {
   on('ui.message', ($, e, next) => {
     const data = e.data as { open?: unknown; action?: unknown } | null
     if (e.element === 'model-button' && data?.open === 'model') void openModelPicker($)
+    if (e.element === 'context-label' && data?.open === 'context') void openContext($)
     if (e.element === 'folder-button' && data?.action === 'copy-path') void copyPath($, e.surface)
     return next(e)
   })
@@ -297,7 +307,16 @@ export const register: Register = on => {
         if ('Client' in elements) {
           const { Client } = elements
           if (press === 'model') {
-            return <Client key="model-button" module="./model-button.tsx" props={{ label, color: group[0]?.color ?? 'cyan' }} />
+            return (
+              <Client
+                key="model-button"
+                module="./command-button.tsx"
+                props={{ label, command: 'model', color: group[0]?.color ?? 'cyan', bold: true }}
+              />
+            )
+          }
+          if (press === 'context-label') {
+            return <Client key="context-label" module="./command-button.tsx" props={{ label, command: 'context' }} />
           }
           // On the desktop the longer path reflows the band under the pointer, which then leaves and
           // re-enters the folder in a loop; there a click copies and the toast shows the path.
@@ -326,6 +345,7 @@ export const register: Register = on => {
           )
         }
         if (press === 'model') return <Button key="open-model" plain label={label} onPress={() => void openModelPicker($)} />
+        if (press === 'context-label') return <Button key="open-context" plain label={label} onPress={() => void openContext($)} />
         if (press === 'folder') {
           return <Button key="copy-path" plain label={label} onPress={press => void copyPath($, press.surface)} />
         }

@@ -1,12 +1,13 @@
-// The band's "Opus 5.5 · medium", drawn in its own color and clickable: a Button's label takes
-// no color, so this surface module draws the text and posts a click to the hooks module.
+// A label on the band that runs a slash command on click: "Opus 5.5 · medium" opens /model,
+// "ctx" opens /context. A Button's label takes no color, so this surface module draws the text
+// and posts the click to the hooks module, which runs the command.
 
 import type { ClientModule } from 'claude-code'
 
-export type ModelButtonProps = { label: string; color: string }
+export type CommandButtonProps = { label: string; command: string; color?: string; bold?: boolean }
 type State = { isHovered: boolean; isPressed: boolean }
 
-const ModelButton: ClientModule<ModelButtonProps, State> = (props, surface) => {
+const CommandButton: ClientModule<CommandButtonProps, State> = (props, surface) => {
   const { Text } = surface.elements
   const state = surface.state ?? { isHovered: false, isPressed: false }
 
@@ -24,17 +25,17 @@ const ModelButton: ClientModule<ModelButtonProps, State> = (props, surface) => {
     if (event.type === 'up' && state.isPressed) {
       const isInside = event.x >= 0 && event.y >= 0 && (surface.columns === 0 || (event.x < surface.columns && event.y < surface.rows))
       surface.setState({ ...state, isPressed: false })
-      if (isInside) surface.post({ open: 'model' })
+      if (isInside) surface.post({ open: props.command })
     }
   })
 
   // Under the pointer the colors invert: the label's color fills the cells, and the letters take
   // the terminal's own background, as if cut out of it.
   return (
-    <Text color={props.color} bold inverse={state.isHovered}>
+    <Text color={props.color} bold={props.bold} inverse={state.isHovered}>
       {props.label}
     </Text>
   )
 }
 
-export default ModelButton
+export default CommandButton
