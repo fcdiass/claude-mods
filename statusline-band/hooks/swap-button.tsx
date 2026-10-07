@@ -1,11 +1,11 @@
 // A stretch of the band that shows other text: `hover` swaps it while the pointer is over it
 // (the folder to its full path, and a click posts `action`, which the hooks module copies);
-// `click` swaps it on each click (the 5h/7d windows to the cost and back).
+// `click` swaps it on each click (the 5h/7d windows to the cost and back); `none` never swaps.
 
 import type { ClientModule, JsonValue } from 'claude-code'
 
 export type Part = { text: string; color?: string; bold?: boolean; dim?: boolean; underline?: boolean }
-export type SwapButtonProps = { parts: Part[]; altParts: Part[]; trigger: 'hover' | 'click'; action?: string }
+export type SwapButtonProps = { parts: Part[]; altParts: Part[]; trigger: 'hover' | 'click' | 'none'; action?: string }
 type State = { isHovered: boolean; isPressed: boolean; isToggled: boolean }
 
 const SwapButton: ClientModule<SwapButtonProps, State> = (props, surface) => {

@@ -291,14 +291,20 @@ export const register: Register = on => {
       // colors through a Client; elsewhere the model and folder are plain Buttons, the windows Text.
       const pressable = (press: Press, group: Seg[]) => {
         const label = group.map(seg => seg.text).join('')
+        // Only the terminal's /model opens a picker; elsewhere it prints its usage, and the
+        // desktop app has a model picker of its own, so the model stays plain colored text.
+        if (press === 'model' && e.surface !== 'terminal') return <Text wrap="truncate-end">{styled(group)}</Text>
         if ('Client' in elements) {
           const { Client } = elements
           if (press === 'model') {
             return <Client key="model-button" module="./model-button.tsx" props={{ label, color: group[0]?.color ?? 'cyan' }} />
           }
+          // On the desktop the longer path reflows the band under the pointer, which then leaves and
+          // re-enters the folder in a loop; there a click copies and the toast shows the path.
+          const folderTrigger: 'hover' | 'none' = e.surface === 'terminal' ? 'hover' : 'none'
           const swap =
             press === 'folder'
-              ? { key: 'folder-button', trigger: 'hover' as const, alt: [{ text: `📂 ${cwd}`, color: 'white', underline: true }], action: 'copy-path' }
+              ? { key: 'folder-button', trigger: folderTrigger, alt: [{ text: `📂 ${cwd}`, color: 'white', underline: true }], action: 'copy-path' }
               : press === 'usage'
                 ? { key: 'usage-button', trigger: 'click' as const, alt: costAltSegs(usage.cost?.usd) }
                 : {

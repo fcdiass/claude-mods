@@ -28,13 +28,10 @@ const ModelButton: ClientModule<ModelButtonProps, State> = (props, surface) => {
     }
   })
 
-  // Under the pointer the colors invert: white text on the label's color.
-  return state.isHovered ? (
-    <Text color="white" backgroundColor={props.color} bold>
-      {props.label}
-    </Text>
-  ) : (
-    <Text color={props.color} bold>
+  // Under the pointer the colors invert: the label's color fills the cells, and the letters take
+  // the terminal's own background, as if cut out of it.
+  return (
+    <Text color={props.color} bold inverse={state.isHovered}>
       {props.label}
     </Text>
   )

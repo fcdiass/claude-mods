@@ -109,3 +109,17 @@ test('a click on the context bar swaps the percentage for tokens, another swaps 
   await click()
   expect(await ctxText()).toContain('36%')
 })
+
+test('on the desktop the folder does not swap under the pointer; a click copies and the toast shows the path', async ($, on) => {
+  const { copied, toasts } = engine(on)
+  const band = await $.ui.mount({ plugin: 'statusline-band', surface: 'desktop', ...BAND })
+  const drawnText = async () => JSON.stringify(await band.drawn({ in: 'folder-button' }))
+  await band.pointer({ type: 'enter', x: 0, y: 0, in: 'folder-button' })
+  expect(await drawnText()).toContain('📁 claude-mods')
+  expect(await drawnText()).not.toContain('📂')
+
+  await band.pointer({ type: 'down', x: 1, y: 0, button: 'left', in: 'folder-button' })
+  await band.pointer({ type: 'up', x: 1, y: 0, button: 'left', in: 'folder-button' })
+  expect(copied).toEqual([CWD])
+  expect(toasts).toEqual([`Path copied: ${CWD}`])
+})

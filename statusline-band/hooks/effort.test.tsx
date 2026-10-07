@@ -100,12 +100,21 @@ test('a typed /model to a model without effort drops the effort from the band', 
   expect(await band.find({ key: 'model-button' })).toMatchObject({ props: { props: { label: 'Haiku 4.5' } } })
 })
 
-test('the model text is drawn cyan and bold, white on cyan under the pointer', async ($, on) => {
+test('the model text is drawn cyan and bold, inverted (cut out of cyan) under the pointer', async ($, on) => {
   engine(on)
   const band = await $.ui.mount({ plugin: 'statusline-band', surface: 'terminal', ...BAND })
   expect(await band.drawn({ in: 'model-button' })).toMatchObject({ type: 'Text', props: { color: 'cyan', bold: true } })
   await band.pointer({ type: 'enter', x: 0, y: 0, in: 'model-button' })
-  expect(await band.drawn({ in: 'model-button' })).toMatchObject({ props: { color: 'white', backgroundColor: 'cyan' } })
+  expect(await band.drawn({ in: 'model-button' })).toMatchObject({ props: { color: 'cyan', inverse: true } })
   await band.pointer({ type: 'leave', x: -1, y: 0, in: 'model-button' })
-  expect(await band.drawn({ in: 'model-button' })).toMatchObject({ props: { color: 'cyan' } })
+  expect(await band.drawn({ in: 'model-button' })).toMatchObject({ props: { color: 'cyan', inverse: false } })
+})
+
+test('on the desktop the model text is plain, since its /model opens no picker', async ($, on) => {
+  const { ran } = engine(on)
+  const band = await $.ui.mount({ plugin: 'statusline-band', surface: 'desktop', ...BAND })
+  expect(await band.find({ key: 'model-button' })).toBeUndefined()
+  expect(await band.find({ key: 'open-model' })).toBeUndefined()
+  expect(await band.find({ type: 'Text', text: /Opus 5\.5/ })).toBeDefined()
+  expect(ran).toEqual([])
 })
