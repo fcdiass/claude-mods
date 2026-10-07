@@ -3,7 +3,7 @@ import type { EngineInterface, Register, RenderSurface, SessionRateLimit } from 
 
 import type { GitInfo, RunningTool } from '../types'
 import { LONG_TOOL_MS, climb, gauges } from './alerts'
-import { FIVE_HOUR_MS, SEVEN_DAY_MS, buildLines, contextAltSegs, costAltSegs, fmtDuration, projectByPace } from './format'
+import { FIVE_HOUR_MS, SEVEN_DAY_MS, accountHasWindows, buildLines, contextAltSegs, costAltSegs, fmtDuration, projectByPace } from './format'
 import type { Press, RateLimit, Seg } from './format'
 import { effortFromCommand, effortFromModelCommand } from './effort'
 
@@ -135,9 +135,10 @@ export const register: Register = on => {
         read($, alerts),
         read($, hasWindows),
       ])
-      if (usage.rateLimits.length > 0 && !isKnown) {
-        await update($, hasWindows, () => true)
-        await $.store.set(HAS_WINDOWS_KEY, true)
+      const isSubscription = accountHasWindows(isKnown, usage.rateLimits.length, usage.context.tokens)
+      if (isSubscription !== isKnown) {
+        await update($, hasWindows, () => isSubscription)
+        await $.store.set(HAS_WINDOWS_KEY, isSubscription)
       }
       const { toasts, levels } = climb(
         previous,
@@ -221,23 +222,26 @@ export const register: Register = on => {
       entry = undefined
     }
 
-    const result = await next(e)
-
-    if (entry) {
-      const done = entry
-      try {
-        await update($, running, list => list.filter(r => r.id !== done.id))
-        const ms = (await $.clock.now()) - done.startedAt
-        if (ms >= LONG_TOOL_MS) {
-          const isOk = result.deny === undefined && result.isError !== true
-          $.ui.toast(`${isOk ? '✔' : '✘'} ${done.label} finished in ${fmtDuration(ms)}`, { timeoutMs: 8000 })
+    let result: Awaited<ReturnType<typeof next>> | undefined
+    try {
+      result = await next(e)
+      return result
+    } finally {
+      // A call that threw (one interrupted, say) leaves the band too, and a long one toasts as failed.
+      if (entry) {
+        const done = entry
+        try {
+          await update($, running, list => list.filter(r => r.id !== done.id))
+          const ms = (await $.clock.now()) - done.startedAt
+          if (ms >= LONG_TOOL_MS) {
+            const isOk = result !== undefined && result.deny === undefined && result.isError !== true
+            $.ui.toast(`${isOk ? '✔' : '✘'} ${done.label} finished in ${fmtDuration(ms)}`, { timeoutMs: 8000 })
+          }
+        } catch {
+          // The result is returned whatever happened to the band.
         }
-      } catch {
-        // The result is returned whatever happened to the band.
       }
     }
-
-    return result
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
@@ -262,7 +266,7 @@ export const register: Register = on => {
       git: gitInfo,
       contextPercent: usage.context.percent,
       costUsd: usage.cost?.usd,
-      hasWindows: isKnownSubscription || usage.rateLimits.length > 0,
+      hasWindows: accountHasWindows(isKnownSubscription, usage.rateLimits.length, usage.context.tokens),
       fiveHour: rateLimit('five_hour', usage.rateLimits, nowMs),
       sevenDay: rateLimit('seven_day', usage.rateLimits, nowMs),
       running: oldest ? { label: oldest.label, startedAt: oldest.startedAt, count: inFlight.length } : undefined,

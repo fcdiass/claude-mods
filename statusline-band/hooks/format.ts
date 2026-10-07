@@ -211,6 +211,18 @@ export function costAltSegs(costUsd: number | undefined): Seg[] {
   return [{ text: 'cost ≈ ' }, { text: `$${(costUsd ?? 0).toFixed(2)}`, color: C.YL }, { text: ' API-equivalent', dim: true }]
 }
 
+/**
+ * Whether the account is one with 5h/7d windows, from what was known before and what the
+ * engine reports now: windows mark it as one; a model response that came back without them
+ * (the context's tokens are its figure) marks it as not, as when an API key replaces the
+ * subscription; before any response nothing changes.
+ */
+export function accountHasWindows(wasKnown: boolean, rateLimitCount: number, contextTokens: number | undefined): boolean {
+  if (rateLimitCount > 0) return true
+  if (contextTokens !== undefined) return false
+  return wasKnown
+}
+
 export function buildLines(s: StatusInput): [Seg[], Seg[]] {
   const cwdN = s.cwd.replace(/\\/g, '/')
   const folder = cwdN.replace(/\/+$/, '').split('/').pop() || cwdN

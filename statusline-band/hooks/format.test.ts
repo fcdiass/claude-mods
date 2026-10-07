@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { C, bar, buildLines, contextAltSegs, costAltSegs, fmtTokens, fmtDuration, fmtReset, FIVE_HOUR_MS, SEVEN_DAY_MS, modelName, projectByPace, rateLimitColor } from './format'
+import { C, accountHasWindows, bar, buildLines, contextAltSegs, costAltSegs, fmtTokens, fmtDuration, fmtReset, FIVE_HOUR_MS, SEVEN_DAY_MS, modelName, projectByPace, rateLimitColor } from './format'
 
 const text = (segs: { text: string }[]) => segs.map(s => s.text).join('')
 
@@ -159,4 +159,14 @@ test('the context percentage rounds as /context does', async () => {
   // 719.5k of 1M is 71.95%: /context shows 72%.
   expect(text(buildLines({ ...base, contextPercent: 71.95 })[1])).toContain(' 72%')
   expect(text(buildLines({ ...base, contextPercent: 71.4 })[1])).toContain(' 71%')
+})
+
+test('the account is one with windows until a response comes back without them', async () => {
+  // Windows reported: a subscription, whatever was known.
+  expect(accountHasWindows(false, 2, 1000)).toBe(true)
+  // No response yet in this window (fresh, or just compacted): what was known stands.
+  expect(accountHasWindows(true, 0, undefined)).toBe(true)
+  expect(accountHasWindows(false, 0, undefined)).toBe(false)
+  // A response with no windows: an API key or a gateway, so the cost comes back.
+  expect(accountHasWindows(true, 0, 1000)).toBe(false)
 })

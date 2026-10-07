@@ -48,3 +48,26 @@ test('a short tool call does not toast', async ($, on) => {
   await $.tool.call({ tool: 'Bash', command: 'git status' } as never)
   expect(toasts).toEqual([])
 })
+
+test('a call that throws leaves the band, and a long one toasts as failed', async ($, on) => {
+  const { clock, toasts } = engine(on)
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  on('session.cwd', () => ({ value: '/x' }))
+  on('session.usage', () => ({ value: { startedAt: NOW, context: { window: 1_000_000 }, rateLimits: [] } }))
+  on('tool.call', async () => {
+    await clock.advance(61_000)
+    throw new Error('interrupted')
+  })
+
+  await expect($.tool.call({ tool: 'Bash', command: 'sleep 100', description: 'Wait' } as never)).rejects.toThrow()
+  expect(toasts).toEqual(['✘ Bash: Wait finished in 1m01s'])
+
+  // Had it stayed in the list, the band would show it as running 61 s on.
+  const band = await $.ui.mount({
+    plugin: 'statusline-band',
+    surface: 'terminal',
+    component: 'AbovePrompt',
+    props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 160, scroll: { offset: 0, bodyRows: 9 }, view: {} },
+  })
+  expect(JSON.stringify(await band.drawn())).not.toContain('▶')
+})
