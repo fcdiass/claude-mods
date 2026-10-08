@@ -210,13 +210,17 @@ function rateLimitSegs(label: string, rl: RateLimit | undefined, windowMs: numbe
   const color = windowColor(rl, windowMs, nowMs)
   const reset = showResetAt ? fmtResetAt(resetsAtMs, nowMs) : fmtReset(resetsAtMs, nowMs)
   const eta = isResetNow ? undefined : rl?.etaMs
+  // The spaces between the clickable stretches stay out of them, so the pointer lights the text alone.
+  const usage = (segs: Seg[]) => segs.map(seg => ({ ...seg, press: 'usage' as const }))
   return [
-    { text: `${label} ` },
-    ...rateLimitBar(isResetNow ? 0 : used, isResetNow ? undefined : elapsed, color),
-    { text: ' ' },
-    { text: fmtPct(used), color },
+    ...usage([
+      { text: `${label} ` },
+      ...rateLimitBar(isResetNow ? 0 : used, isResetNow ? undefined : elapsed, color),
+      { text: ' ' },
+      { text: fmtPct(used), color },
+    ]),
     ...(reset ? [{ text: ' ' }, { text: reset, dim: true, press: 'reset' as const }] : []),
-    ...(eta !== undefined ? [{ text: ` ⚠ 100% in ${fmtSpan(eta)}`, color: C.RD, bold: true }] : []),
+    ...(eta !== undefined ? [{ text: ' ' }, ...usage([{ text: `⚠ 100% in ${fmtSpan(eta)}`, color: C.RD, bold: true }])] : []),
   ]
 }
 
@@ -302,7 +306,7 @@ export function buildLines(s: StatusInput): [Seg[], Seg[]] {
 
   const line2: Seg[] = [
     { text: 'ctx', press: 'context-label' },
-    { text: ' ', press: 'context' },
+    { text: ' ' },
     ...contextBar(pct, s.compactAtPercent, ctxColor).map(seg => ({ ...seg, press: 'context' as const })),
     { text: ' ', press: 'context' },
     { text: `${pct}%`, color: ctxColor, press: 'context' },
@@ -315,7 +319,7 @@ export function buildLines(s: StatusInput): [Seg[], Seg[]] {
             ...rateLimitSegs('5h', s.fiveHour, FIVE_HOUR_MS, s.nowMs, s.showResetAt),
             SEP,
             ...rateLimitSegs('7d', s.sevenDay, SEVEN_DAY_MS, s.nowMs, s.showResetAt),
-          ].map(seg => (seg.press ? seg : { ...seg, press: 'usage' as const }))),
+          ]),
   ]
 
   return [line1, line2]

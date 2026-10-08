@@ -367,7 +367,7 @@ export const register: Register = on => {
               <Client
                 key={key}
                 module="./swap-button.tsx"
-                props={{ parts: toParts(group), altParts: toParts(group), trigger: 'none', action }}
+                props={{ parts: toParts(group), altParts: toParts(group), trigger: 'none', action, isHoverInverse: true }}
               />
             )
           }
@@ -391,6 +391,7 @@ export const register: Register = on => {
                 altParts: toParts(swap.alt),
                 trigger: swap.trigger,
                 ...('action' in swap && { action: swap.action }),
+                ...(press === 'context' && { isHoverInverse: true }),
               }}
             />
           )

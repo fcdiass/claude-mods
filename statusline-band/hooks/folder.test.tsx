@@ -145,3 +145,16 @@ test('a click on a reset swaps both resets for their clock time; another swaps b
   await click()
   expect(await resets()).toContain('↺ 4h00m')
 })
+
+test('the context bar, the windows and the resets invert under the pointer', async ($, on) => {
+  engine(on, true, WINDOWS)
+  const band = await $.ui.mount({ plugin: 'statusline-band', surface: 'terminal', ...BAND })
+  for (const key of ['context-button', 'usage-button', 'reset-button']) {
+    const isInverse = async () => JSON.stringify(await band.drawn({ in: key })).includes('"inverse":true')
+    expect(await isInverse()).toBe(false)
+    await band.pointer({ type: 'enter', x: 0, y: 0, in: key })
+    expect(await isInverse()).toBe(true)
+    await band.pointer({ type: 'leave', x: -1, y: 0, in: key })
+    expect(await isInverse()).toBe(false)
+  }
+})
