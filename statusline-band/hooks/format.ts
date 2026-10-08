@@ -1,8 +1,9 @@
 // Port of ~/.claude/statusline.py, plus the mod-only figures: builds the two lines as colored segments.
 
 // `press` makes the segment interactive: `model` and `context-label` open /model and /context, `folder` shows and
-// copies the path, `usage` and `context` swap to the cost and the token count on a click.
-export type Press = 'model' | 'folder' | 'usage' | 'context' | 'context-label'
+// copies the path, `usage` and `context` swap to the cost and the token count on a click, `reset` swaps the
+// reset countdowns for the clock time of the reset.
+export type Press = 'model' | 'folder' | 'usage' | 'context' | 'context-label' | 'reset'
 export type Seg = { text: string; color?: string; bold?: boolean; dim?: boolean; underline?: boolean; press?: Press }
 
 export const C = {
@@ -26,14 +27,20 @@ export type StatusInput = {
   model: string
   effort?: string | null
   cwd: string
-  git: { repo: string; branch: string } | null
+  git: { repo: string; branch: string; changes?: number; ahead?: number; behind?: number } | null
   contextPercent?: number
+  /** Where auto-compaction runs, as a percentage of the context window; absent when it is off. */
+  compactAtPercent?: number
   costUsd?: number
   /** A subscription's account: the 5h/7d windows are what limits it, so they stand in for the cost. */
   hasWindows: boolean
   fiveHour?: RateLimit
   sevenDay?: RateLimit
   running?: Running
+  /** The windows swapped for the API-equivalent cost. */
+  showCost?: boolean
+  /** The reset countdowns swapped for the clock time of the reset. */
+  showResetAt?: boolean
   nowMs: number
 }
 
@@ -77,6 +84,18 @@ export function bar(pct: number, width = BAR_WIDTH): string {
   return '█'.repeat(filled) + '░'.repeat(width - filled)
 }
 
+// The context bar, with a white │ where auto-compaction runs, as the 5h/7d bars mark the time elapsed.
+export function contextBar(pct: number, compactAtPercent: number | undefined, color: string, width = BAR_WIDTH): Seg[] {
+  const cells = bar(pct, width)
+  if (compactAtPercent === undefined) return [{ text: cells, color }]
+  const marker = Math.min(width - 1, Math.max(0, Math.floor((compactAtPercent * width) / 100)))
+  return [
+    ...(marker > 0 ? [{ text: cells.slice(0, marker), color }] : []),
+    { text: '│', color: C.WH },
+    ...(marker < width - 1 ? [{ text: cells.slice(marker + 1), color }] : []),
+  ]
+}
+
 function fmtPct(val: number | undefined): string {
   return val === undefined ? '--' : `${val.toFixed(0)}%`
 }
@@ -98,6 +117,24 @@ export function fmtReset(resetsAtMs: number | undefined, nowMs: number): string 
   const remaining = Math.floor(resetsAtMs / 1000) - Math.floor(nowMs / 1000)
   if (remaining <= 0) return '↺ now'
   return `↺ ${fmtSpan(remaining * 1000)}`
+}
+
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const
+
+// The reset as a local clock time: 14:00 today, Sat 14:00 within the week, next Wed 14:00 a week on.
+export function fmtResetAt(resetsAtMs: number | undefined, nowMs: number): string {
+  if (resetsAtMs === undefined) return ''
+  if (resetsAtMs <= nowMs) return '↺ now'
+  const at = new Date(resetsAtMs)
+  const now = new Date(nowMs)
+  const time = `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`
+  const days = Math.round(
+    (new Date(at.getFullYear(), at.getMonth(), at.getDate()).getTime() -
+      new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()) /
+      86_400_000,
+  )
+  if (days === 0) return `↺ ${time}`
+  return `↺ ${days >= 7 ? 'next ' : ''}${WEEKDAYS[at.getDay()]} ${time}`
 }
 
 export function parseReset(resetsAt: string | undefined): number | undefined {
@@ -164,21 +201,21 @@ export function windowColor(rl: RateLimit | undefined, windowMs: number, nowMs: 
   return rateLimitColor(rl?.percentUsed, windowFraction(resetsAtMs, windowMs, nowMs))
 }
 
-function rateLimitSegs(label: string, rl: RateLimit | undefined, windowMs: number, nowMs: number): Seg[] {
+function rateLimitSegs(label: string, rl: RateLimit | undefined, windowMs: number, nowMs: number, showResetAt = false): Seg[] {
   const used = rl?.percentUsed
   const resetsAtMs = parseReset(rl?.resetsAt)
   // When the window has fully elapsed, zero out both fill and marker.
   const isResetNow = resetsAtMs !== undefined && resetsAtMs <= nowMs
   const elapsed = windowFraction(resetsAtMs, windowMs, nowMs)
   const color = windowColor(rl, windowMs, nowMs)
-  const reset = fmtReset(resetsAtMs, nowMs)
+  const reset = showResetAt ? fmtResetAt(resetsAtMs, nowMs) : fmtReset(resetsAtMs, nowMs)
   const eta = isResetNow ? undefined : rl?.etaMs
   return [
     { text: `${label} ` },
     ...rateLimitBar(isResetNow ? 0 : used, isResetNow ? undefined : elapsed, color),
     { text: ' ' },
     { text: fmtPct(used), color },
-    ...(reset ? [{ text: ` ${reset}`, dim: true }] : []),
+    ...(reset ? [{ text: ' ' }, { text: reset, dim: true, press: 'reset' as const }] : []),
     ...(eta !== undefined ? [{ text: ` ⚠ 100% in ${fmtSpan(eta)}`, color: C.RD, bold: true }] : []),
   ]
 }
@@ -233,6 +270,10 @@ export function buildLines(s: StatusInput): [Seg[], Seg[]] {
         { text: s.git.repo, color: C.GR, bold: true, press: 'folder' },
         { text: ':', dim: true, press: 'folder' },
         { text: s.git.branch, color: C.YL, press: 'folder' },
+        // Files changed, then commits not yet pushed and not yet pulled.
+        ...(s.git.changes ? [{ text: ` ●${s.git.changes}`, color: C.OR, press: 'folder' as const }] : []),
+        ...(s.git.ahead ? [{ text: ` ↑${s.git.ahead}`, color: C.CY, press: 'folder' as const }] : []),
+        ...(s.git.behind ? [{ text: ` ↓${s.git.behind}`, color: C.CY, press: 'folder' as const }] : []),
       ]
     : [{ text: `📁 ${folder}`, dim: true, press: 'folder' }]
 
@@ -262,17 +303,19 @@ export function buildLines(s: StatusInput): [Seg[], Seg[]] {
   const line2: Seg[] = [
     { text: 'ctx', press: 'context-label' },
     { text: ' ', press: 'context' },
-    { text: bar(pct), color: ctxColor, press: 'context' },
+    ...contextBar(pct, s.compactAtPercent, ctxColor).map(seg => ({ ...seg, press: 'context' as const })),
     { text: ' ', press: 'context' },
     { text: `${pct}%`, color: ctxColor, press: 'context' },
     SEP,
-    ...(s.hasWindows
-      ? [
-          ...rateLimitSegs('5h', s.fiveHour, FIVE_HOUR_MS, s.nowMs),
-          SEP,
-          ...rateLimitSegs('7d', s.sevenDay, SEVEN_DAY_MS, s.nowMs),
-        ].map(seg => ({ ...seg, press: 'usage' as const }))
-      : costSegs(s.costUsd)),
+    ...(!s.hasWindows
+      ? costSegs(s.costUsd)
+      : s.showCost
+        ? costAltSegs(s.costUsd).map(seg => ({ ...seg, press: 'usage' as const }))
+        : [
+            ...rateLimitSegs('5h', s.fiveHour, FIVE_HOUR_MS, s.nowMs, s.showResetAt),
+            SEP,
+            ...rateLimitSegs('7d', s.sevenDay, SEVEN_DAY_MS, s.nowMs, s.showResetAt),
+          ].map(seg => (seg.press ? seg : { ...seg, press: 'usage' as const }))),
   ]
 
   return [line1, line2]

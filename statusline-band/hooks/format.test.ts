@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { C, accountHasWindows, bar, buildLines, contextAltSegs, costAltSegs, fmtTokens, fmtDuration, fmtReset, FIVE_HOUR_MS, SEVEN_DAY_MS, modelName, projectByPace, rateLimitColor } from './format'
+import { C, accountHasWindows, bar, buildLines, fmtResetAt, contextAltSegs, costAltSegs, fmtTokens, fmtDuration, fmtReset, FIVE_HOUR_MS, SEVEN_DAY_MS, modelName, projectByPace, rateLimitColor } from './format'
 
 const text = (segs: { text: string }[]) => segs.map(s => s.text).join('')
 
@@ -169,4 +169,47 @@ test('the account is one with windows until a response comes back without them',
   expect(accountHasWindows(false, 0, undefined)).toBe(false)
   // A response with no windows: an API key or a gateway, so the cost comes back.
   expect(accountHasWindows(true, 0, 1000)).toBe(false)
+})
+
+test('git shows files changed and commits ahead and behind, only when there are some', async () => {
+  const now = Date.parse('2026-10-07T12:00:00Z')
+  const base = { model: 'm', cwd: '/x', hasWindows: false, nowMs: now }
+  const [dirty] = buildLines({ ...base, git: { repo: 'repo', branch: 'main', changes: 3, ahead: 1, behind: 2 } })
+  expect(text(dirty)).toContain('repo:main ●3 ↑1 ↓2')
+  const [clean] = buildLines({ ...base, git: { repo: 'repo', branch: 'main', changes: 0, ahead: 0, behind: 0 } })
+  expect(text(clean).endsWith('repo:main')).toBe(true)
+})
+
+test('the context bar marks where auto-compaction runs', async () => {
+  const now = Date.parse('2026-10-07T12:00:00Z')
+  const base = { model: 'm', cwd: '/x', git: null, hasWindows: false, nowMs: now, contextPercent: 72 }
+  expect(text(buildLines({ ...base, compactAtPercent: 96.7 })[1])).toContain('ctx ███████░░│ 72%')
+  expect(text(buildLines({ ...base, compactAtPercent: 80 })[1])).toContain('ctx ███████░│░ 72%')
+  expect(text(buildLines(base)[1])).toContain('ctx ███████░░░ 72%')
+})
+
+test('a reset reads as a local clock time', async () => {
+  // Wednesday, 7 October 2026, noon, in whatever zone the test runs.
+  const now = new Date(2026, 9, 7, 12, 0).getTime()
+  expect(fmtResetAt(new Date(2026, 9, 7, 14, 0).getTime(), now)).toBe('↺ 14:00')
+  expect(fmtResetAt(new Date(2026, 9, 10, 9, 5).getTime(), now)).toBe('↺ Sat 09:05')
+  expect(fmtResetAt(new Date(2026, 9, 14, 9, 30).getTime(), now)).toBe('↺ next Wed 09:30')
+  expect(fmtResetAt(now - 1000, now)).toBe('↺ now')
+})
+
+test('the windows swap for the cost, and the resets for their clock time', async () => {
+  const now = new Date(2026, 9, 7, 12, 0).getTime()
+  const base = {
+    model: 'm', cwd: '/x', git: null, hasWindows: true, costUsd: 22.06, nowMs: now,
+    fiveHour: { percentUsed: 34, resetsAt: new Date(2026, 9, 7, 14, 0).toISOString() },
+    sevenDay: { percentUsed: 12, resetsAt: new Date(2026, 9, 10, 9, 0).toISOString() },
+  }
+  const [, resetAt] = buildLines({ ...base, showResetAt: true })
+  expect(text(resetAt)).toContain('34% ↺ 14:00')
+  expect(text(resetAt)).toContain('12% ↺ Sat 09:00')
+  expect(resetAt.filter(seg => seg.press === 'reset').map(seg => seg.text)).toEqual(['↺ 14:00', '↺ Sat 09:00'])
+
+  const [, cost] = buildLines({ ...base, showCost: true })
+  expect(text(cost)).toContain('cost ≈ $22.06 API-equivalent')
+  expect(text(cost)).not.toContain('5h')
 })

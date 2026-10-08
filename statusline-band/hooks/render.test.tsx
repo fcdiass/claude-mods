@@ -46,7 +46,7 @@ test('the band draws both lines on the terminal and desktop', async ($, on) => {
     else expect(await ui.find({ key: 'model-button' })).toBeUndefined()
     // A subscription: the windows stand in for the cost.
     expect(await ui.find({ type: 'Text', text: /\$1\.42/ })).toBeUndefined()
-    expect(JSON.stringify(await ui.drawn({ in: 'usage-button' }))).toContain('↺ 3d00h')
+    expect(JSON.stringify(await ui.drawn({ in: 'reset-button-2' }))).toContain('↺ 3d00h')
     await ui.unmount()
   }
 })

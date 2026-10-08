@@ -32,3 +32,9 @@ test('5h window ahead of pace, critical and projected', async () => {
   expect(critical.five_hour?.level).toBe(2)
   expect(critical['five_hour.eta']?.message).toBe('5h window: at this pace it hits 100% in 20m, resets in 4h30m')
 })
+
+test('the context toast says where auto-compaction runs', async () => {
+  expect(gauges({ contextPercent: 86, compactAtPercent: 96.7, nowMs: NOW }).context?.message).toBe(
+    'Context at 86% (auto-compacts at 97%)',
+  )
+})

@@ -7,6 +7,7 @@ export type Gauge = { level: number; message: string }
 
 export type AlertInput = {
   contextPercent?: number
+  compactAtPercent?: number
   fiveHour?: RateLimit
   sevenDay?: RateLimit
   nowMs: number
@@ -36,10 +37,11 @@ function windowGauges(key: string, label: string, rl: RateLimit | undefined, win
 
 export function gauges(s: AlertInput): Record<string, Gauge> {
   const ctx = Math.round(s.contextPercent ?? 0)
+  const compactAt = s.compactAtPercent === undefined ? '' : ` (auto-compacts at ${Math.round(s.compactAtPercent)}%)`
   return {
     context: {
       level: ctx >= 85 ? 2 : ctx >= 70 ? 1 : 0,
-      message: `Context at ${ctx}%`,
+      message: `Context at ${ctx}%${compactAt}`,
     },
     ...windowGauges('five_hour', '5h', s.fiveHour, FIVE_HOUR_MS, s.nowMs),
     ...windowGauges('seven_day', '7d', s.sevenDay, SEVEN_DAY_MS, s.nowMs),

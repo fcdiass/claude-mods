@@ -1,6 +1,6 @@
 {
   "name": "statusline-band",
-  "version": "0.14.2",
+  "version": "0.15.0",
   "description": "Colored band above the prompt: model and effort, git, context, 5h/7d usage windows (or cost on an API account), running tool and threshold toasts",
   "author": { "name": "Francisco Corrêa Dias", "email": "fcdiass@gmail.com" },
   "types": "./types/index.d.ts"

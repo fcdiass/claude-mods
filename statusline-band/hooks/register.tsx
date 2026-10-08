@@ -3,15 +3,19 @@ import type { EngineInterface, Register, RenderSurface, SessionRateLimit } from 
 
 import type { GitInfo, RunningTool } from '../types'
 import { LONG_TOOL_MS, climb, gauges } from './alerts'
-import { FIVE_HOUR_MS, SEVEN_DAY_MS, accountHasWindows, buildLines, contextAltSegs, costAltSegs, fmtDuration, projectByPace } from './format'
+import { FIVE_HOUR_MS, SEVEN_DAY_MS, accountHasWindows, buildLines, contextAltSegs, fmtDuration, projectByPace } from './format'
 import type { Press, RateLimit, Seg } from './format'
 import { effortFromCommand, effortFromModelCommand } from './effort'
+import { parseGitStatus } from './git'
 
 const git = atom({ plugin: 'statusline-band', key: 'git' } as const, null)
 const running = atom({ plugin: 'statusline-band', key: 'running' } as const, [])
 const alerts = atom({ plugin: 'statusline-band', key: 'alerts' } as const, {})
 const effort = atom({ plugin: 'statusline-band', key: 'effort' } as const, null)
 const hasWindows = atom({ plugin: 'statusline-band', key: 'hasWindows' } as const, false)
+const compactAt = atom({ plugin: 'statusline-band', key: 'compactAt' } as const, null)
+const showCost = atom({ plugin: 'statusline-band', key: 'showCost' } as const, false)
+const showResetAt = atom({ plugin: 'statusline-band', key: 'showResetAt' } as const, false)
 
 // Kept across sessions: an account once seen with 5h/7d windows shows them from the first draw,
 // before this session's first API response brings them.
@@ -28,21 +32,31 @@ async function settingsEffort($: EngineInterface): Promise<string | null> {
 const WINDOW_MS = { five_hour: FIVE_HOUR_MS, seven_day: SEVEN_DAY_MS } as const
 type WindowKind = keyof typeof WINDOW_MS
 
+// --no-optional-locks: the status every 5 s never holds the index lock a git of the person's needs.
 async function readGit($: EngineInterface, cwd: string): Promise<GitInfo | null> {
-  const run = (...args: string[]) => $.process.run(['git', '-C', cwd, ...args], { timeoutMs: 5000 })
+  const run = (...args: string[]) =>
+    $.process.run(['git', '--no-optional-locks', '-C', cwd, ...args], { timeoutMs: 5000 })
   try {
     const root = await run('rev-parse', '--show-toplevel')
-    const head = await run('rev-parse', '--abbrev-ref', 'HEAD')
-    if (root.exitCode !== 0 || head.exitCode !== 0) return null
-    let branch = head.stdout.trim()
-    if (branch === 'HEAD') {
-      const sha = await run('rev-parse', '--short', 'HEAD')
-      branch = '#' + sha.stdout.trim()
-    }
+    if (root.exitCode !== 0) return null
+    const status = await run('status', '--porcelain=v2', '--branch')
+    if (status.exitCode !== 0) return null
     const repo = root.stdout.trim().replace(/\\/g, '/').split('/').pop() ?? ''
-    return { repo, branch }
+    return { repo, ...parseGitStatus(status.stdout) }
   } catch {
     return null
+  }
+}
+
+// The token count at which auto-compaction runs, as /context reckons it (estimated locally, no
+// request sent); null when it is off. It changes with the model, so a /model reads it again.
+async function refreshCompactAt($: EngineInterface): Promise<void> {
+  try {
+    const { breakdown } = (await $.session.usage({ breakdown: 'summary' })).context
+    const threshold = breakdown?.isAutoCompactEnabled ? (breakdown.autoCompactThreshold ?? null) : null
+    if ((await read($, compactAt)) !== threshold) await update($, compactAt, () => threshold)
+  } catch {
+    // The band goes on without the mark.
   }
 }
 
@@ -63,6 +77,7 @@ async function afterModelCommand($: EngineInterface, output: string | undefined,
   const level =
     output === undefined ? await settingsEffort($) : named === null && isSameModel ? undefined : named
   if (level !== undefined && (await read($, effort)) !== level) await update($, effort, () => level)
+  await refreshCompactAt($)
   $.ui.invalidate('ui.render')
 }
 
@@ -140,10 +155,12 @@ export const register: Register = on => {
         await update($, hasWindows, () => isSubscription)
         await $.store.set(HAS_WINDOWS_KEY, isSubscription)
       }
+      const threshold = await read($, compactAt)
       const { toasts, levels } = climb(
         previous,
         gauges({
           contextPercent: usage.context.percent,
+          compactAtPercent: threshold === null ? undefined : (threshold / usage.context.window) * 100,
           fiveHour: rateLimit('five_hour', usage.rateLimits, nowMs),
           sevenDay: rateLimit('seven_day', usage.rateLimits, nowMs),
           nowMs,
@@ -154,6 +171,8 @@ export const register: Register = on => {
     }
 
     await refreshGit()
+    await refreshCompactAt($)
+    $.clock.every(60_000, () => void refreshCompactAt($))
     $.clock.every(5000, () => void Promise.all([refreshGit(), checkAlerts()]).catch(() => {}))
 
     // The reset countdowns and the running tool's time move with the clock.
@@ -189,12 +208,14 @@ export const register: Register = on => {
   })
 
   // Clicks on the band's Clients: the model text opens the /model picker, ctx opens /context,
-  // the folder copies its path.
+  // the folder copies its path, the windows swap for the cost and a reset for its clock time.
   on('ui.message', ($, e, next) => {
     const data = e.data as { open?: unknown; action?: unknown } | null
     if (e.element === 'model-button' && data?.open === 'model') void openModelPicker($)
     if (e.element === 'context-label' && data?.open === 'context') void openContext($)
     if (e.element === 'folder-button' && data?.action === 'copy-path') void copyPath($, e.surface)
+    if (data?.action === 'toggle-cost') void update($, showCost, isShown => !isShown)
+    if (data?.action === 'toggle-reset') void update($, showResetAt, isShown => !isShown)
     return next(e)
   })
 
@@ -248,7 +269,8 @@ export const register: Register = on => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
 
-    const [model, cwd, usage, nowMs, gitInfo, inFlight, effortLevel, isKnownSubscription] = await Promise.all([
+    const [model, cwd, usage, nowMs, gitInfo, inFlight, effortLevel, isKnownSubscription, threshold, isCostShown, isResetAtShown] =
+      await Promise.all([
       $.session.model(),
       $.session.cwd(),
       $.session.usage(),
@@ -257,6 +279,9 @@ export const register: Register = on => {
       read($, running),
       read($, effort),
       read($, hasWindows),
+      read($, compactAt),
+      read($, showCost),
+      read($, showResetAt),
     ])
 
     const oldest = inFlight[0]
@@ -266,11 +291,14 @@ export const register: Register = on => {
       cwd,
       git: gitInfo,
       contextPercent: usage.context.percent,
+      compactAtPercent: threshold === null ? undefined : (threshold / usage.context.window) * 100,
       costUsd: usage.cost?.usd,
       hasWindows: accountHasWindows(isKnownSubscription, usage.rateLimits.length, usage.context.tokens),
       fiveHour: rateLimit('five_hour', usage.rateLimits, nowMs),
       sevenDay: rateLimit('seven_day', usage.rateLimits, nowMs),
       running: oldest ? { label: oldest.label, startedAt: oldest.startedAt, count: inFlight.length } : undefined,
+      showCost: isCostShown,
+      showResetAt: isResetAtShown,
       nowMs,
     })
 
@@ -283,6 +311,13 @@ export const register: Register = on => {
           {s.text}
         </Text>
       ))
+
+    // The first element of a kind takes its name as key, later ones a count: usage-button, usage-button-2.
+    const keyCounts: Record<string, number> = {}
+    const keyOf = (name: string) => {
+      const n = (keyCounts[name] = (keyCounts[name] ?? 0) + 1)
+      return n === 1 ? name : `${name}-${n}`
+    }
 
     // Plain runs of a line are Text; a pressable segment is a Button with no chrome.
     const row = (segs: Seg[]) => {
@@ -323,19 +358,30 @@ export const register: Register = on => {
           if (press === 'context-label') {
             return <Client key="context-label" module="./command-button.tsx" props={{ label, command: 'context' }} />
           }
+          // The windows and their resets are split by the resets into several elements, so they
+          // swap through the mod's state, all at once; each element only posts its click.
+          if (press === 'usage' || press === 'reset') {
+            const key = keyOf(press === 'usage' ? 'usage-button' : 'reset-button')
+            const action = press === 'usage' ? 'toggle-cost' : 'toggle-reset'
+            return (
+              <Client
+                key={key}
+                module="./swap-button.tsx"
+                props={{ parts: toParts(group), altParts: toParts(group), trigger: 'none', action }}
+              />
+            )
+          }
           // On the desktop the longer path reflows the band under the pointer, which then leaves and
           // re-enters the folder in a loop; there a click copies and the toast shows the path.
           const folderTrigger: 'hover' | 'none' = e.surface === 'terminal' ? 'hover' : 'none'
           const swap =
             press === 'folder'
               ? { key: 'folder-button', trigger: folderTrigger, alt: [{ text: `📂 ${cwd}`, color: 'white', underline: true }], action: 'copy-path' }
-              : press === 'usage'
-                ? { key: 'usage-button', trigger: 'click' as const, alt: costAltSegs(usage.cost?.usd) }
-                : {
-                    key: 'context-button',
-                    trigger: 'click' as const,
-                    alt: contextAltSegs(usage.context.percent, usage.context.tokens, usage.context.window),
-                  }
+              : {
+                  key: 'context-button',
+                  trigger: 'click' as const,
+                  alt: contextAltSegs(usage.context.percent, usage.context.tokens, usage.context.window),
+                }
           return (
             <Client
               key={swap.key}

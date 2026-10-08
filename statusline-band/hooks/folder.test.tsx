@@ -123,3 +123,25 @@ test('on the desktop the folder does not swap under the pointer; a click copies 
   expect(copied).toEqual([CWD])
   expect(toasts).toEqual([`Path copied: ${CWD}`])
 })
+
+test('a click on a reset swaps both resets for their clock time; another swaps back', async ($, on) => {
+  engine(on, true, WINDOWS)
+  const band = await $.ui.mount({ plugin: 'statusline-band', surface: 'terminal', ...BAND })
+  const resets = async () => JSON.stringify([await band.drawn({ in: 'reset-button' }), await band.drawn({ in: 'reset-button-2' })])
+  const click = async () => {
+    await band.pointer({ type: 'down', x: 1, y: 0, button: 'left', in: 'reset-button-2' })
+    await band.pointer({ type: 'up', x: 1, y: 0, button: 'left', in: 'reset-button-2' })
+  }
+  expect(await resets()).toContain('↺ 4h00m')
+  expect(await resets()).toContain('↺ 4d00h')
+
+  await click()
+  expect(await resets()).not.toContain('↺ 4h00m')
+  expect(await resets()).not.toContain('↺ 4d00h')
+  expect(await resets()).toMatch(/↺ \d\d:\d\d/)
+  // The windows themselves stay.
+  expect(JSON.stringify(await band.drawn({ in: 'usage-button' }))).toContain('21%')
+
+  await click()
+  expect(await resets()).toContain('↺ 4h00m')
+})
