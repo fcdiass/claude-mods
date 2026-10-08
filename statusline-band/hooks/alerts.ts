@@ -1,7 +1,8 @@
 // Which gauges are past a threshold, and the toast each raises when it climbs to that level.
 
-import { C, FIVE_HOUR_MS, SEVEN_DAY_MS, fmtSpan, parseReset, windowColor } from './format'
+import { C, FIVE_HOUR_MS, SEVEN_DAY_MS, fmtSpan, fmtTokens, parseReset, windowColor } from './format'
 import type { RateLimit } from './format'
+import type { CacheStatus } from './cache'
 
 export type Gauge = { level: number; message: string }
 
@@ -46,6 +47,38 @@ export function gauges(s: AlertInput): Record<string, Gauge> {
     ...windowGauges('five_hour', '5h', s.fiveHour, FIVE_HOUR_MS, s.nowMs),
     ...windowGauges('seven_day', '7d', s.sevenDay, SEVEN_DAY_MS, s.nowMs),
   }
+}
+
+// The skill ai-memory installs; with it, a session can wrap up into a handoff and /clear.
+export const HANDOFF_SKILL = 'ai-memory-handoff'
+
+// Before the cache lapses: wrapping up now costs a turn over a warm cache, later a rebuild.
+export function cacheExpiryMessage(remainingMs: number, tokens: number, hasHandoff: boolean): string {
+  const wrapUp = hasHandoff
+    ? `Done for now? /${HANDOFF_SKILL} while it is warm, then /clear`
+    : 'Done for now? /compact while it is warm, or /clear for a new task'
+  const minutes = Math.max(1, Math.ceil(remainingMs / 60_000))
+  return `Prompt cache lapses in ${minutes}m: the next prompt after that re-caches ${fmtTokens(tokens)} tokens. ${wrapUp}`
+}
+
+// A prompt that went out over a cold cache: what it cost, and how to spare the next one.
+export function coldPromptMessage(tokens: number, hasHandoff: boolean): string {
+  const next = hasHandoff
+    ? `Next time, /${HANDOFF_SKILL} before it lapses lets you /clear and resume`
+    : 'Next time, /compact before it lapses, or /clear for a new task'
+  return `Prompt cache was cold: this prompt re-caches ${fmtTokens(tokens)} tokens. ${next}`
+}
+
+// A click on the cache's countdown: its state, when it lapses, its size and how well it served.
+export function cacheDetailsMessage(c: CacheStatus, nowMs: number): string {
+  const at = new Date(nowMs + c.remainingMs)
+  const clock = `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`
+  const state =
+    c.remainingMs > 0
+      ? `warm, lapses in ${fmtSpan(c.remainingMs)} (${clock}); ${fmtTokens(c.tokens)} tokens cached`
+      : `cold; the next prompt re-caches ${fmtTokens(c.tokens)} tokens`
+  const rebuilds = `${c.rebuilds} rebuild${c.rebuilds === 1 ? '' : 's'}`
+  return `Prompt cache ${state} · TTL ${c.ttlMs >= 3_600_000 ? '1h' : '5m'} · ${Math.round(c.hitPercent)}% hit · ${rebuilds}`
 }
 
 /**

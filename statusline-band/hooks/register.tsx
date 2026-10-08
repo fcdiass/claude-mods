@@ -1,9 +1,19 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register, RenderSurface, SessionRateLimit } from 'claude-code'
+import type { EngineInterface, Register, RenderSurface, SessionRateLimit, SessionUsage } from 'claude-code'
 
 import type { GitInfo, RunningTool } from '../types'
-import { LONG_TOOL_MS, climb, gauges } from './alerts'
-import { FIVE_HOUR_MS, SEVEN_DAY_MS, accountHasWindows, buildLines, contextAltSegs, fmtDuration, projectByPace } from './format'
+import { HANDOFF_SKILL, LONG_TOOL_MS, cacheDetailsMessage, cacheExpiryMessage, climb, coldPromptMessage, gauges } from './alerts'
+import { CACHE_ALERT_TOKENS, cacheStatus, cacheTtl, isExpiryDue, recordStep, ttlOverride } from './cache'
+import type { CacheStatus } from './cache'
+import {
+  FIVE_HOUR_MS,
+  SEVEN_DAY_MS,
+  accountHasWindows,
+  buildLines,
+  contextAltSegs,
+  fmtDuration,
+  projectByPace,
+} from './format'
 import type { Press, RateLimit, Seg } from './format'
 import { effortFromCommand, effortFromModelCommand } from './effort'
 import { parseGitStatus } from './git'
@@ -16,6 +26,9 @@ const hasWindows = atom({ plugin: 'statusline-band', key: 'hasWindows' } as cons
 const compactAt = atom({ plugin: 'statusline-band', key: 'compactAt' } as const, null)
 const showCost = atom({ plugin: 'statusline-band', key: 'showCost' } as const, false)
 const showResetAt = atom({ plugin: 'statusline-band', key: 'showResetAt' } as const, false)
+const cache = atom({ plugin: 'statusline-band', key: 'cache' } as const, null)
+const forcedTtl = atom({ plugin: 'statusline-band', key: 'ttlOverride' } as const, null)
+const hasHandoff = atom({ plugin: 'statusline-band', key: 'hasHandoff' } as const, false)
 
 // Kept across sessions: an account once seen with 5h/7d windows shows them from the first draw,
 // before this session's first API response brings them.
@@ -57,6 +70,46 @@ async function refreshCompactAt($: EngineInterface): Promise<void> {
     if ((await read($, compactAt)) !== threshold) await update($, compactAt, () => threshold)
   } catch {
     // The band goes on without the mark.
+  }
+}
+
+// What may change the cache's TTL or the toasts' advice: the settings, the environment, and
+// whether ai-memory's handoff skill is installed. Read with the compaction mark, every minute.
+async function refreshCacheConfig($: EngineInterface): Promise<void> {
+  try {
+    const [settings, force5m, envTtl, enable1h, commands] = await Promise.all([
+      $.settings.read(),
+      $.env.get('FORCE_PROMPT_CACHING_5M'),
+      $.env.get('CLAUDE_CODE_PROMPT_CACHE_TTL'),
+      $.env.get('ENABLE_PROMPT_CACHING_1H'),
+      $.command.list().catch(() => []),
+    ])
+    const ttl = ttlOverride({ force5m, envTtl, settingTtl: settings.promptCacheTtl, enable1h })
+    if ((await read($, forcedTtl)) !== ttl) await update($, forcedTtl, () => ttl)
+    const isHandoff = commands.some(c => c.name === HANDOFF_SKILL)
+    if ((await read($, hasHandoff)) !== isHandoff) await update($, hasHandoff, () => isHandoff)
+  } catch {
+    // The account's default TTL and the plain advice stand.
+  }
+}
+
+// The cache as of now: its TTL from the settings, else from the account (a window used up means
+// usage credits, on the shorter TTL).
+async function readCache($: EngineInterface, usage: SessionUsage, nowMs: number): Promise<CacheStatus | undefined> {
+  const [mark, override, isKnown, model] = await Promise.all([read($, cache), read($, forcedTtl), read($, hasWindows), $.session.model()])
+  const isPastWindow = usage.rateLimits.some(l => (l.percentUsed ?? 0) >= 100)
+  const ttl = cacheTtl(override, accountHasWindows(isKnown, usage.rateLimits.length, usage.context.tokens), isPastWindow)
+  return cacheStatus(mark, ttl, model, nowMs)
+}
+
+// A click on the cache's countdown toasts its details.
+async function showCacheDetails($: EngineInterface): Promise<void> {
+  try {
+    const [usage, nowMs] = await Promise.all([$.session.usage(), $.clock.now()])
+    const status = await readCache($, usage, nowMs)
+    if (status) $.ui.toast(cacheDetailsMessage(status, nowMs), { timeoutMs: 15_000 })
+  } catch {
+    // Nothing to show.
   }
 }
 
@@ -168,11 +221,19 @@ export const register: Register = on => {
       )
       for (const text of toasts) $.ui.toast(text, { timeoutMs: 8000 })
       if (JSON.stringify(levels) !== JSON.stringify(previous)) await update($, alerts, () => levels)
+
+      // Once per response, a large prefix toasts a few minutes before its cache lapses.
+      const status = await readCache($, usage, nowMs)
+      if (status && isExpiryDue(status) && (await read($, cache))?.isExpiryWarned === false) {
+        await update($, cache, mark => (mark ? { ...mark, isExpiryWarned: true } : mark))
+        $.ui.toast(cacheExpiryMessage(status.remainingMs, status.tokens, await read($, hasHandoff)), { timeoutMs: 60_000 })
+      }
     }
 
     await refreshGit()
     await refreshCompactAt($)
-    $.clock.every(60_000, () => void refreshCompactAt($))
+    await refreshCacheConfig($)
+    $.clock.every(60_000, () => void Promise.all([refreshCompactAt($), refreshCacheConfig($)]))
     $.clock.every(5000, () => void Promise.all([refreshGit(), checkAlerts()]).catch(() => {}))
 
     // The reset countdowns and the running tool's time move with the clock.
@@ -181,18 +242,43 @@ export const register: Register = on => {
     return result
   })
 
-  // Reads the effort each main-thread model request carries (none for a model without effort);
-  // the request goes on unchanged.
+  // Reads the effort each main-thread model request carries (none for a model without effort),
+  // and what its response tells of the prompt cache; the request goes on unchanged.
   on('turn.step', async function* ($, e, next) {
-    if (e.agentId === undefined) {
+    if (e.agentId !== undefined) return yield* next(e)
+    try {
+      const level = e.effort === undefined ? null : String(e.effort)
+      if ((await read($, effort)) !== level) await update($, effort, () => level)
+    } catch {
+      // The request is sent whatever happened to the band.
+    }
+    const result = yield* next(e)
+    try {
+      const usage = result.usage
+      if (usage) {
+        const nowMs = await $.clock.now()
+        await update($, cache, mark => recordStep(mark, usage, nowMs))
+      }
+    } catch {
+      // The response is returned whatever happened to the band.
+    }
+    return result
+  })
+
+  // A prompt sent while idle over a cold cache of a large prefix toasts what it re-caches.
+  // It goes out unchanged; a prompt typed mid-turn rides a warm cache.
+  on('prompt.submit', async ($, e, next) => {
+    if (e.turnId === undefined) {
       try {
-        const level = e.effort === undefined ? null : String(e.effort)
-        if ((await read($, effort)) !== level) await update($, effort, () => level)
+        const status = await readCache($, await $.session.usage(), await $.clock.now())
+        if (status && status.remainingMs <= 0 && status.tokens >= CACHE_ALERT_TOKENS) {
+          $.ui.toast(coldPromptMessage(status.tokens, await read($, hasHandoff)), { timeoutMs: 15_000 })
+        }
       } catch {
-        // The request is sent whatever happened to the band.
+        // The prompt is sent whatever happened to the band.
       }
     }
-    return yield* next(e)
+    return next(e)
   })
 
   // A typed /effort shows on the band as soon as it has run.
@@ -216,6 +302,7 @@ export const register: Register = on => {
     if (e.element === 'folder-button' && data?.action === 'copy-path') void copyPath($, e.surface)
     if (data?.action === 'toggle-cost') void update($, showCost, isShown => !isShown)
     if (data?.action === 'toggle-reset') void update($, showResetAt, isShown => !isShown)
+    if (data?.action === 'cache-details') void showCacheDetails($)
     return next(e)
   })
 
@@ -284,6 +371,7 @@ export const register: Register = on => {
       read($, showResetAt),
     ])
 
+    const cacheNow = await readCache($, usage, nowMs).catch(() => undefined)
     const oldest = inFlight[0]
     const lines = buildLines({
       model,
@@ -299,6 +387,7 @@ export const register: Register = on => {
       running: oldest ? { label: oldest.label, startedAt: oldest.startedAt, count: inFlight.length } : undefined,
       showCost: isCostShown,
       showResetAt: isResetAtShown,
+      cache: cacheNow,
       nowMs,
     })
 
@@ -360,9 +449,9 @@ export const register: Register = on => {
           }
           // The windows and their resets are split by the resets into several elements, so they
           // swap through the mod's state, all at once; each element only posts its click.
-          if (press === 'usage' || press === 'reset') {
-            const key = keyOf(press === 'usage' ? 'usage-button' : 'reset-button')
-            const action = press === 'usage' ? 'toggle-cost' : 'toggle-reset'
+          if (press === 'usage' || press === 'reset' || press === 'cache') {
+            const key = keyOf(press === 'usage' ? 'usage-button' : press === 'reset' ? 'reset-button' : 'cache-button')
+            const action = press === 'usage' ? 'toggle-cost' : press === 'reset' ? 'toggle-reset' : 'cache-details'
             return (
               <Client
                 key={key}
@@ -398,6 +487,7 @@ export const register: Register = on => {
         }
         if (press === 'model') return <Button key="open-model" plain label={label} onPress={() => void openModelPicker($)} />
         if (press === 'context-label') return <Button key="open-context" plain label={label} onPress={() => void openContext($)} />
+        if (press === 'cache') return <Button key="cache-details" plain label={label} onPress={() => void showCacheDetails($)} />
         if (press === 'folder') {
           return <Button key="copy-path" plain label={label} onPress={press => void copyPath($, press.surface)} />
         }

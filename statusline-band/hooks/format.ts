@@ -1,9 +1,12 @@
 // Port of ~/.claude/statusline.py, plus the mod-only figures: builds the two lines as colored segments.
 
+import { CACHE_ALERT_TOKENS, urgentLeadMs, warnLeadMs } from './cache'
+import type { CacheStatus } from './cache'
+
 // `press` makes the segment interactive: `model` and `context-label` open /model and /context, `folder` shows and
 // copies the path, `usage` and `context` swap to the cost and the token count on a click, `reset` swaps the
-// reset countdowns for the clock time of the reset.
-export type Press = 'model' | 'folder' | 'usage' | 'context' | 'context-label' | 'reset'
+// reset countdowns for the clock time of the reset, `cache` toasts the prompt cache's details.
+export type Press = 'model' | 'folder' | 'usage' | 'context' | 'context-label' | 'reset' | 'cache'
 export type Seg = { text: string; color?: string; bold?: boolean; dim?: boolean; underline?: boolean; press?: Press }
 
 export const C = {
@@ -41,6 +44,8 @@ export type StatusInput = {
   showCost?: boolean
   /** The reset countdowns swapped for the clock time of the reset. */
   showResetAt?: boolean
+  /** The main conversation's prompt cache; absent before its first model request. */
+  cache?: CacheStatus
   nowMs: number
 }
 
@@ -264,6 +269,21 @@ export function accountHasWindows(wasKnown: boolean, rateLimitCount: number, con
   return wasKnown
 }
 
+// Minutes while there are ten or more, then minutes and seconds: 42m, 4m30s, 45s.
+function fmtLeft(ms: number): string {
+  return ms >= 10 * 60_000 ? `${Math.floor(ms / 60_000)}m` : fmtDuration(Math.max(1000, ms))
+}
+
+// The prompt cache beside the context it holds: its countdown, green, yellow near the end and red
+// when the expiry toast is due; once it lapsed, cold, orange when the prefix is large.
+export function cacheSegs(c: CacheStatus): Seg {
+  if (c.remainingMs <= 0) {
+    return c.tokens >= CACHE_ALERT_TOKENS ? { text: '○ cold', color: C.OR } : { text: '○ cold', dim: true }
+  }
+  const color = c.remainingMs <= urgentLeadMs(c.ttlMs) ? C.RD : c.remainingMs <= warnLeadMs(c.ttlMs) ? C.YL : C.GR
+  return { text: `● ${fmtLeft(c.remainingMs)}`, color }
+}
+
 export function buildLines(s: StatusInput): [Seg[], Seg[]] {
   const cwdN = s.cwd.replace(/\\/g, '/')
   const folder = cwdN.replace(/\/+$/, '').split('/').pop() || cwdN
@@ -310,6 +330,7 @@ export function buildLines(s: StatusInput): [Seg[], Seg[]] {
     ...contextBar(pct, s.compactAtPercent, ctxColor).map(seg => ({ ...seg, press: 'context' as const })),
     { text: ' ', press: 'context' },
     { text: `${pct}%`, color: ctxColor, press: 'context' },
+    ...(s.cache ? [{ text: ' ' }, { ...cacheSegs(s.cache), press: 'cache' as const }] : []),
     SEP,
     ...(!s.hasWindows
       ? costSegs(s.costUsd)
