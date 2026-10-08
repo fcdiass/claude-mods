@@ -284,6 +284,17 @@ export function cacheSegs(c: CacheStatus): Seg {
   return { text: `● ${fmtLeft(c.remainingMs)}`, color }
 }
 
+// The windows the account reports: some plans have a 5h window and no weekly one. Before the
+// first response tells which, both stand as placeholders.
+function windowsSegs(s: StatusInput): Seg[] {
+  const isKnown = s.fiveHour !== undefined || s.sevenDay !== undefined
+  const shown = [
+    ...(!isKnown || s.fiveHour ? [rateLimitSegs('5h', s.fiveHour, FIVE_HOUR_MS, s.nowMs, s.showResetAt)] : []),
+    ...(!isKnown || s.sevenDay ? [rateLimitSegs('7d', s.sevenDay, SEVEN_DAY_MS, s.nowMs, s.showResetAt)] : []),
+  ]
+  return shown.flatMap((segs, i) => (i === 0 ? segs : [SEP, ...segs]))
+}
+
 export function buildLines(s: StatusInput): [Seg[], Seg[]] {
   const cwdN = s.cwd.replace(/\\/g, '/')
   const folder = cwdN.replace(/\/+$/, '').split('/').pop() || cwdN
@@ -336,11 +347,7 @@ export function buildLines(s: StatusInput): [Seg[], Seg[]] {
       ? costSegs(s.costUsd)
       : s.showCost
         ? costAltSegs(s.costUsd).map(seg => ({ ...seg, press: 'usage' as const }))
-        : [
-            ...rateLimitSegs('5h', s.fiveHour, FIVE_HOUR_MS, s.nowMs, s.showResetAt),
-            SEP,
-            ...rateLimitSegs('7d', s.sevenDay, SEVEN_DAY_MS, s.nowMs, s.showResetAt),
-          ]),
+        : windowsSegs(s)),
   ]
 
   return [line1, line2]

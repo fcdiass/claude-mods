@@ -46,7 +46,15 @@ test('builds both lines', async () => {
   expect(text(l2)).toContain('ctx ███████░░░ 72%')
   expect(text(l2)).not.toContain('dur')
   expect(text(l2)).toContain('34% ↺ 2h00m')
-  expect(text(l2)).toContain('7d ░░░░░░░░░░ --')
+  // A plan with a 5h window and no weekly one shows the 5h alone.
+  expect(text(l2)).not.toContain('7d')
+  expect(text(l2).endsWith('34% ↺ 2h00m')).toBe(true)
+})
+
+test('before any response tells which windows the plan has, both stand as placeholders', async () => {
+  const now = Date.parse('2026-10-07T12:00:00Z')
+  const [, l2] = buildLines({ model: 'm', cwd: '/x', git: null, hasWindows: true, nowMs: now })
+  expect(text(l2)).toContain('5h ░░░░░░░░░░ -- │ 7d ░░░░░░░░░░ --')
 })
 
 test('a subscription shows the windows, not the cost; an API account the cost, not the windows', async () => {
