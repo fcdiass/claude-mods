@@ -4,7 +4,7 @@ import type { On } from 'claude-code'
 import { climb } from './alerts'
 import { buildLines } from './format'
 import type { StatusInput } from './format'
-import { DEFAULT_SETTINGS, readSettings, toastLevel } from './settings'
+import { DEFAULT_SETTINGS, nextValue, readSettings, toastLevel } from './settings'
 import type { Settings } from './settings'
 
 const NOW = Date.parse('2026-10-07T12:00:00Z')
@@ -23,7 +23,6 @@ const INPUT: StatusInput = {
   costUsd: 1.5,
   hasWindows: true,
   fiveHour: { percentUsed: 34, resetsAt: new Date(NOW + 2 * 3600_000).toISOString() },
-  running: { label: 'Bash: npm test', startedAt: NOW - 5000, count: 1 },
   cache: { remainingMs: 42 * MIN, ttlMs: 60 * MIN, tokens: 700_000, hitPercent: 90, rebuilds: 0 },
   nowMs: NOW,
 }
@@ -33,25 +32,24 @@ const band = (settings: Partial<Settings>, input: Partial<StatusInput> = {}) =>
 
 test('a value /config does not offer stands as its default', async () => {
   expect(readSettings()).toEqual(DEFAULT_SETTINGS)
-  expect(readSettings({ git: 'branch', usage: 'windows', cache: 'warn', toasts: 7, runningTool: false })).toEqual({
+  expect(readSettings({ git: 'branch', usage: 'windows', cache: 'warn', toasts: 7 })).toEqual({
     git: 'branch',
     usage: 'auto',
     cache: 'warn',
     toasts: 'all',
-    runningTool: false,
   })
 })
 
 test('the defaults draw the band as it always was', async () => {
   const [line1, line2] = band({})
-  expect(line1).toBe('◆ Opus 5.5 │ ⎇  claude-mods:feature REBASING 2/5 ✖1 ●2 ↑1 ↓3 │ ▶ Bash: npm test 5s')
+  expect(line1).toBe('◆ Opus 5.5 │ ⎇  claude-mods:feature REBASING 2/5 ✖1 ●2 ↑1 ↓3')
   expect(line2).toMatch(/^ctx \S+ 45% ● 42m │ 5h .* 34%/)
   expect(JSON.stringify(buildLines(INPUT))).toBe(JSON.stringify(buildLines({ ...INPUT, settings: DEFAULT_SETTINGS })))
 })
 
 test('git: branch keeps the branch and what is under way; off leaves the folder', async () => {
-  expect(band({ git: 'branch' })[0]).toBe('◆ Opus 5.5 │ ⎇  claude-mods:feature REBASING 2/5 ✖1 │ ▶ Bash: npm test 5s')
-  expect(band({ git: 'off' })[0]).toBe('◆ Opus 5.5 │ 📁 claude-mods │ ▶ Bash: npm test 5s')
+  expect(band({ git: 'branch' })[0]).toBe('◆ Opus 5.5 │ ⎇  claude-mods:feature REBASING 2/5 ✖1')
+  expect(band({ git: 'off' })[0]).toBe('◆ Opus 5.5 │ 📁 claude-mods')
 })
 
 test('usage: rate limits or cost whatever the account, or nothing', async () => {
@@ -61,10 +59,9 @@ test('usage: rate limits or cost whatever the account, or nothing', async () => 
   expect(band({ usage: 'off' })[1]).toMatch(/^ctx \S+ 45% ● 42m$/)
 })
 
-test('cache off hides the countdown, warn keeps it; running tool off hides the tool', async () => {
+test('cache off hides the countdown, warn keeps it', async () => {
   expect(band({ cache: 'off' })[1]).not.toContain('42m')
   expect(band({ cache: 'warn' })[1]).toContain('● 42m')
-  expect(band({ runningTool: false })[0]).toBe('◆ Opus 5.5 │ ⎇  claude-mods:feature REBASING 2/5 ✖1 ●2 ↑1 ↓3')
 })
 
 test('toasts: critical lets only the red thresholds speak, off none; the levels are kept all the same', async () => {
@@ -160,4 +157,92 @@ test('git: off never runs git', { options: { git: 'off' } }, async ($, on) => {
   expect(JSON.stringify(await view.drawn())).toContain('claude-mods')
   expect(ran.filter(argv => argv[0] === 'git')).toEqual([])
   await view.unmount()
+})
+
+test('a press moves a setting to its next value, the last back to the first', async () => {
+  expect(nextValue('git', 'full')).toBe('branch')
+  expect(nextValue('git', 'off')).toBe('full')
+  expect(nextValue('usage', 'cost')).toBe('off')
+  expect(nextValue('toasts', 'bogus')).toBe('all')
+})
+
+// The band's settings, read and changed through /config; `isPlaced` false stands for a surface
+// that places no pane, where two dialogs ask instead.
+function menuEngine(on: On, isPlaced = true, answers: string[] = []) {
+  mock.clock(on, { now: NOW })
+  mock.store(on)
+  const opened: string[] = []
+  const set: [string, unknown][] = []
+  const asked: string[] = []
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  on('session.cwd', () => ({ value: 'D:\repo' }))
+  on('session.usage', () => ({
+    value: { startedAt: NOW, context: { tokens: 10_000, window: 1_000_000, percent: 1 }, rateLimits: [], cost: { usd: 0 } },
+  }))
+  on('ui.open', ($, e) => {
+    opened.push(e.id)
+    return { value: { isPlaced } } as never
+  })
+  on('ui.close', () => ({ value: undefined }) as never)
+  on('ui.toast', () => ({ value: undefined }))
+  // Installed from a marketplace, the rows carry its name.
+  on('config.list', () => ({
+    value: (['git', 'usage', 'cache', 'toasts'] as const).map(field => ({
+      key: `statusline-band@fcdiass-mods.${field}`,
+      label: `Band: ${field}`,
+      kind: 'choice',
+      value: '',
+      provider: { plugin: 'statusline-band', tier: 'user' },
+      isLocked: false,
+    })),
+  }) as never)
+  on('config.set', ($, e) => {
+    set.push([e.key, e.value])
+    return { value: e.value }
+  })
+  on('tool.call', { tool: 'AskUserQuestion' }, ($, e) => {
+    const [q] = (e as unknown as { questions: { question: string; options: { label: string }[] }[] }).questions
+    asked.push(`${q?.question} [${q?.options.map(o => o.label).join(' | ')}]`)
+    const answer = answers.shift()
+    if (answer === undefined) return { deny: 'dismissed' }
+    return { result: { questions: [q], answers: { [q?.question ?? '']: answer } } } as never
+  })
+  return { opened, set, asked }
+}
+
+const PANE = {
+  component: 'Pane',
+  requestId: 'band-settings',
+  props: { title: 'Band settings', isFocused: true, bodyColumns: 60, placement: 'inline', scroll: { offset: 0, bodyRows: 10 }, view: {} },
+} as const
+
+test('a click on the diamond opens the settings; a press moves a row on', { options: { git: 'branch' } }, async ($, on) => {
+  const { opened, set } = menuEngine(on)
+  const view = await $.ui.mount({ plugin: 'statusline-band', surface: 'terminal', ...BAND })
+  await view.pointer({ type: 'down', x: 0, y: 0, button: 'left', in: 'settings-button' } as never)
+  await view.pointer({ type: 'up', x: 0, y: 0, button: 'left', in: 'settings-button' } as never)
+  expect(opened).toEqual(['band-settings'])
+
+  const pane = await $.ui.mount({ plugin: 'statusline-band', surface: 'terminal', ...PANE })
+  const drawn = JSON.stringify(await pane.drawn())
+  for (const row of ['Git           branch', 'Usage         auto', 'Prompt cache  ask', 'Toasts        all']) expect(drawn).toContain(row)
+
+  await pane.press({ key: 'git' })
+  await pane.press({ key: 'toasts' })
+  expect(set).toEqual([
+    ['statusline-band@fcdiass-mods.git', 'off'],
+    ['statusline-band@fcdiass-mods.toasts', 'critical'],
+  ])
+})
+
+test('where no pane opens, two dialogs pick the setting and its value', async ($, on) => {
+  const { set, asked } = menuEngine(on, false, ['Usage: auto', 'cost'])
+  const view = await $.ui.mount({ plugin: 'statusline-band', surface: 'terminal', ...BAND })
+  await view.pointer({ type: 'down', x: 0, y: 0, button: 'left', in: 'settings-button' } as never)
+  await view.pointer({ type: 'up', x: 0, y: 0, button: 'left', in: 'settings-button' } as never)
+  expect(asked).toEqual([
+    'Which band setting to change? [Git: full | Usage: auto | Prompt cache: ask | Toasts: all]',
+    'Usage: which value? [auto | rate-limits | cost | off]',
+  ])
+  expect(set).toEqual([['statusline-band@fcdiass-mods.usage', 'cost']])
 })

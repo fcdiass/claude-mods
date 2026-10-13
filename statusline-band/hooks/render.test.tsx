@@ -40,7 +40,7 @@ test('the band draws both lines on the terminal and desktop', async ($, on) => {
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ plugin: 'statusline-band', surface, ...BAND })
     expect(await ui.drawn()).toMatchObject({ type: 'Box' })
-    expect(await ui.find({ type: 'Text', text: /◆/ })).toBeDefined()
+    expect(JSON.stringify(await ui.drawn())).toContain('◆')
     // The model is clickable on the terminal alone, where /model opens a picker.
     if (surface === 'terminal') expect(await ui.find({ key: 'model-button' })).toBeDefined()
     else expect(await ui.find({ key: 'model-button' })).toBeUndefined()

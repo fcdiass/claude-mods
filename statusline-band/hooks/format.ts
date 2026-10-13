@@ -8,7 +8,7 @@ import type { Settings } from './settings'
 // `press` makes the segment interactive: `model` and `context-label` open /model and /context, `folder` shows and
 // copies the path, `usage` and `context` swap to the cost and the token count on a click, `reset` swaps the
 // reset countdowns for the clock time of the reset, `cache` toasts the prompt cache's details.
-export type Press = 'model' | 'folder' | 'usage' | 'context' | 'context-label' | 'reset' | 'cache' | 'changes'
+export type Press = 'settings' | 'model' | 'folder' | 'usage' | 'context' | 'context-label' | 'reset' | 'cache' | 'changes'
 export type Seg = { text: string; color?: string; bold?: boolean; dim?: boolean; underline?: boolean; press?: Press }
 
 export const C = {
@@ -26,8 +26,6 @@ export const SEVEN_DAY_MS = 7 * 24 * 60 * 60 * 1000
 
 export type RateLimit = { percentUsed?: number; resetsAt?: string; etaMs?: number }
 
-export type Running = { label: string; startedAt: number; count: number }
-
 export type StatusInput = {
   model: string
   effort?: string | null
@@ -41,7 +39,6 @@ export type StatusInput = {
   hasWindows: boolean
   fiveHour?: RateLimit
   sevenDay?: RateLimit
-  running?: Running
   /** The windows swapped for the API-equivalent cost. */
   showCost?: boolean
   /** The reset countdowns swapped for the clock time of the reset. */
@@ -54,9 +51,6 @@ export type StatusInput = {
 }
 
 const SEP: Seg = { text: ' │ ', dim: true }
-
-// A tool call shows on the band once it has run this long.
-export const RUNNING_SHOWN_AFTER_MS = 2000
 
 export function fmtDuration(ms: number): string {
   if (!ms) return '--'
@@ -328,25 +322,19 @@ export function buildLines(s: StatusInput): [Seg[], Seg[]] {
         ...(isFull && s.git.ahead ? [{ text: ` ↑${s.git.ahead}`, color: C.CY }] : []),
         ...(isFull && s.git.behind ? [{ text: ` ↓${s.git.behind}`, color: C.CY }] : []),
       ]
-    : [{ text: `📁 ${folder}`, dim: true, press: 'folder' }]
-
-  const runningMs = s.running ? s.nowMs - s.running.startedAt : 0
-  const runningSegs: Seg[] =
-    settings.runningTool && s.running && runningMs >= RUNNING_SHOWN_AFTER_MS
-      ? [
-          SEP,
-          { text: `▶ ${s.running.label} `, color: C.BL, bold: true },
-          { text: fmtDuration(runningMs), color: C.BL },
-          ...(s.running.count > 1 ? [{ text: ` +${s.running.count - 1}`, dim: true }] : []),
-        ]
-      : []
+    : // The icon apart from the name: the name inverts under the pointer, the icon shows the path.
+      [
+        { text: '📁 ', dim: true, press: 'folder' },
+        { text: folder, dim: true, press: 'folder' },
+      ]
 
   const line1: Seg[] = [
-    { text: '◆ ', color: C.CY, bold: true },
+    // The diamond opens the band's settings.
+    { text: '◆', color: C.CY, bold: true, press: 'settings' },
+    { text: ' ' },
     { text: modelEffortLabel(s.model, s.effort), color: C.CY, bold: true, press: 'model' },
     SEP,
     ...gitSegs,
-    ...runningSegs,
   ]
 
   // Rounded, as /context rounds it, so both read the same figure.

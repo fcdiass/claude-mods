@@ -40,22 +40,27 @@ test('the folder shows its name, and its full path with the pointer over its ico
   const band = await $.ui.mount({ plugin: 'statusline-band', surface: 'terminal', ...BAND })
   const drawnText = async () => JSON.stringify(await band.drawn({ in: 'folder-button' }))
   const path = JSON.stringify(CWD).slice(1, -1)
-  expect(await drawnText()).toContain('📁 claude-mods')
+  const isName = async () => (await drawnText()).includes('"claude-mods"') && !(await drawnText()).includes(path)
+  const isInverse = async () => (await drawnText()).includes('"inverse":true')
+  expect(await isName()).toBe(true)
+  expect(await isInverse()).toBe(false)
 
-  // Over the name: nothing changes.
+  // Over the name: the name inverts, a sign a click opens the menu.
   await band.pointer({ type: 'enter', x: 5, y: 0, in: 'folder-button' })
   await band.pointer({ type: 'move', x: 6, y: 0, in: 'folder-button' })
-  expect(await drawnText()).toContain('📁 claude-mods')
+  expect(await isName()).toBe(true)
+  expect(await isInverse()).toBe(true)
 
   // Onto the icon: the path; back to the name, and out: the name.
   await band.pointer({ type: 'move', x: 1, y: 0, in: 'folder-button' })
   expect(await drawnText()).toContain(path)
   await band.pointer({ type: 'move', x: 6, y: 0, in: 'folder-button' })
-  expect(await drawnText()).toContain('📁 claude-mods')
+  expect(await isName()).toBe(true)
   await band.pointer({ type: 'enter', x: 0, y: 0, in: 'folder-button' })
   expect(await drawnText()).toContain(path)
   await band.pointer({ type: 'leave', x: -1, y: 0, in: 'folder-button' })
-  expect(await drawnText()).toContain('📁 claude-mods')
+  expect(await isName()).toBe(true)
+  expect(await isInverse()).toBe(false)
 })
 
 test('a click on the name copies nothing', async ($, on) => {
@@ -137,7 +142,7 @@ test('on the desktop the folder does not swap under the pointer; a click on the 
   const band = await $.ui.mount({ plugin: 'statusline-band', surface: 'desktop', ...BAND })
   const drawnText = async () => JSON.stringify(await band.drawn({ in: 'folder-button' }))
   await band.pointer({ type: 'enter', x: 0, y: 0, in: 'folder-button' })
-  expect(await drawnText()).toContain('📁 claude-mods')
+  expect(await drawnText()).toContain('"claude-mods"')
   expect(await drawnText()).not.toContain('📂')
 
   await band.pointer({ type: 'down', x: 1, y: 0, button: 'left', in: 'folder-button' })

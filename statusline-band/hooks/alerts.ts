@@ -14,9 +14,6 @@ export type AlertInput = {
   nowMs: number
 }
 
-// A command that runs at least this long toasts when it ends.
-export const LONG_TOOL_MS = 60_000
-
 function windowGauges(key: string, label: string, rl: RateLimit | undefined, windowMs: number, nowMs: number): Record<string, Gauge> {
   if (rl?.percentUsed === undefined) return {}
   const pct = rl.percentUsed.toFixed(0)

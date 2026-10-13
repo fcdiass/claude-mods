@@ -49,9 +49,6 @@ export type CacheMark = {
   isExpiryWarned: boolean
 }
 
-/** A tool call in flight. */
-export type RunningTool = { id: string; label: string; startedAt: number }
-
 declare module 'claude-code' {
   interface PluginState {
     'statusline-band': {
@@ -60,7 +57,6 @@ declare module 'claude-code' {
       effort: string | null
       /** A subscription's account, whose 5h/7d windows stand in for the cost. */
       hasWindows: boolean
-      running: RunningTool[]
       /** Last alert level raised per gauge, so each crossing toasts once. */
       alerts: Record<string, number>
       /** The token count at which auto-compaction runs; null when it is off or not yet read. */

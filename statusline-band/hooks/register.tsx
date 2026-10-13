@@ -1,11 +1,10 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderSurface, SessionRateLimit, SessionUsage } from 'claude-code'
 
-import type { ChangedFile, GitChanges, GitInfo, HostTools, RunningTool } from '../types'
+import type { ChangedFile, GitChanges, GitInfo, HostTools } from '../types'
 import {
   COLD_SEND,
   HANDOFF_SKILL,
-  LONG_TOOL_MS,
   cacheDetailsMessage,
   cacheExpiryMessage,
   climb,
@@ -25,7 +24,6 @@ import {
   accountHasWindows,
   buildLines,
   contextAltSegs,
-  fmtDuration,
   projectByPace,
 } from './format'
 import type { Press, RateLimit, Seg } from './format'
@@ -34,10 +32,10 @@ import { parseGitStatus, readOperation } from './git'
 import { parseDiff } from './changes'
 import { actionArgv, menuItems } from './host'
 import type { MenuItem } from './host'
-import { readSettings, toastLevel } from './settings'
+import { CHOICES, SETTING_ROWS, nextValue, readSettings, toastLevel } from './settings'
+import type { SettingKey, Settings } from './settings'
 
 const git = atom({ plugin: 'statusline-band', key: 'git' } as const, null)
-const running = atom({ plugin: 'statusline-band', key: 'running' } as const, [])
 const alerts = atom({ plugin: 'statusline-band', key: 'alerts' } as const, {})
 const effort = atom({ plugin: 'statusline-band', key: 'effort' } as const, null)
 const hasWindows = atom({ plugin: 'statusline-band', key: 'hasWindows' } as const, false)
@@ -274,6 +272,51 @@ async function refreshOpenChanges($: EngineInterface): Promise<void> {
   if (panes.some(pane => pane.id === CHANGES_PANE)) await refreshChanges($).catch(() => undefined)
 }
 
+// The band's settings: a click on the diamond opens them in a pane, one row a setting, keyed
+// 1-4; a press moves the row to its next value. The change goes through /config, which reloads
+// the module with it, so the band and the pane redraw from the new options.
+
+const SETTINGS_PANE = 'band-settings'
+
+// The /config row of a field: its key names the plugin as the loader does (`statusline-band@<marketplace>`
+// installed, `statusline-band` from a folder), so it is looked up, never spelled.
+async function settingRow($: EngineInterface, key: SettingKey): Promise<string | undefined> {
+  const rows = await $.config.list()
+  const ours = rows.filter(row => row.provider.plugin === 'statusline-band' || row.key.startsWith('statusline-band'))
+  return ours.find(row => row.key.endsWith(`.${key}`))?.key
+}
+
+async function changeSetting($: EngineInterface, key: SettingKey, value: string): Promise<void> {
+  try {
+    const row = await settingRow($, key)
+    if (row === undefined) {
+      $.ui.toast(`Could not change the setting: /config has no row for ${key}`, { timeoutMs: 8000 })
+      return
+    }
+    const result = await $.config.set({ key: row, value })
+    if (result.deny !== undefined) $.ui.toast(`Could not change the setting: ${result.deny}`, { timeoutMs: 8000 })
+  } catch (error) {
+    $.ui.toast(`Could not change the setting: ${String(error)}`, { timeoutMs: 8000 })
+  }
+}
+
+// Where the surface places no pane, the same in two dialogs: which setting, then its value.
+async function openSettings($: EngineInterface, settings: Settings): Promise<void> {
+  try {
+    const opened = await $.ui.open({ id: SETTINGS_PANE, title: 'Band settings', focus: true, closeOnEscape: true, rows: SETTING_ROWS.length })
+    if (opened.isPlaced) return
+    await $.ui.close({ id: SETTINGS_PANE }).catch(() => undefined)
+    const rowLabel = (row: (typeof SETTING_ROWS)[number]) => `${row.label}: ${settings[row.key]}`
+    const picked = await $.ui.ask('Which band setting to change?', { header: 'Band', options: SETTING_ROWS.map(rowLabel) })
+    const row = SETTING_ROWS.find(one => rowLabel(one) === picked)
+    if (!row) return
+    const value = await $.ui.ask(`${row.label}: which value?`, { header: 'Band', options: [...CHOICES[row.key]] })
+    if (value && value !== settings[row.key]) await changeSetting($, row.key, value)
+  } catch {
+    // Dismissed, or nothing could open: the settings stay.
+  }
+}
+
 // Shows Claude Code's own /context breakdown, as typing /context does.
 async function openContext($: EngineInterface): Promise<void> {
   try {
@@ -293,18 +336,6 @@ async function openModelPicker($: EngineInterface): Promise<void> {
   } catch (error) {
     $.ui.toast(`/model failed: ${String(error)}`, { timeoutMs: 8000 })
   }
-}
-
-function labelOf(e: { tool: string }): string {
-  const fields = e as { description?: unknown; command?: unknown }
-  const detail =
-    typeof fields.description === 'string' && fields.description
-      ? fields.description
-      : typeof fields.command === 'string'
-        ? fields.command
-        : ''
-  const short = detail.length > 40 ? detail.slice(0, 39) + '…' : detail
-  return short ? `${e.tool}: ${short}` : e.tool
 }
 
 export const register: Register = (on, options) => {
@@ -374,7 +405,7 @@ export const register: Register = (on, options) => {
     $.clock.every(60_000, () => void Promise.all([refreshCompactAt($), refreshCacheConfig($)]))
     $.clock.every(5000, () => void Promise.all([refreshGit(), checkAlerts()]).catch(() => {}))
 
-    // The reset countdowns and the running tool's time move with the clock.
+    // The reset and cache countdowns move with the clock.
     $.clock.every(1000, () => $.ui.invalidate('ui.render'))
 
     return result
@@ -473,6 +504,7 @@ export const register: Register = (on, options) => {
   // the folder copies its path, the windows swap for the cost and a reset for its clock time.
   on('ui.message', ($, e, next) => {
     const data = e.data as { open?: unknown; action?: unknown } | null
+    if (e.element === 'settings-button' && data?.action === 'band-settings') void openSettings($, settings)
     if (e.element === 'model-button' && data?.open === 'model') void openModelPicker($)
     if (e.element === 'context-label' && data?.open === 'context') void openContext($)
     if (e.element === 'folder-button' && data?.action === 'copy-path') void copyPath($, e.surface)
@@ -496,52 +528,16 @@ export const register: Register = (on, options) => {
     return result
   })
 
-  // Observes every tool call without changing it: the band shows what is running,
-  // and a call that ran a minute or more toasts when it ends.
-  on('tool.call', async ($, e, next) => {
-    let entry: RunningTool | undefined
-    try {
-      const startedAt = await $.clock.now()
-      entry = { id: e.tool_use_id ?? `${e.tool}@${startedAt}`, label: labelOf(e), startedAt }
-      const added = entry
-      await update($, running, list => [...list, added])
-    } catch {
-      entry = undefined
-    }
-
-    let result: Awaited<ReturnType<typeof next>> | undefined
-    try {
-      result = await next(e)
-      return result
-    } finally {
-      // A call that threw (one interrupted, say) leaves the band too, and a long one toasts as failed.
-      if (entry) {
-        const done = entry
-        try {
-          await update($, running, list => list.filter(r => r.id !== done.id))
-          const ms = (await $.clock.now()) - done.startedAt
-          if (ms >= LONG_TOOL_MS && settings.toasts === 'all') {
-            const isOk = result !== undefined && result.deny === undefined && result.isError !== true
-            $.ui.toast(`${isOk ? '✔' : '✘'} ${done.label} finished in ${fmtDuration(ms)}`, { timeoutMs: 8000 })
-          }
-        } catch {
-          // The result is returned whatever happened to the band.
-        }
-      }
-    }
-  })
-
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
 
-    const [model, cwd, usage, nowMs, gitInfo, inFlight, effortLevel, isKnownSubscription, threshold, isCostShown, isResetAtShown, cacheMark] =
+    const [model, cwd, usage, nowMs, gitInfo, effortLevel, isKnownSubscription, threshold, isCostShown, isResetAtShown, cacheMark] =
       await Promise.all([
       $.session.model(),
       $.session.cwd(),
       $.session.usage(),
       $.clock.now(),
       read($, git),
-      read($, running),
       read($, effort),
       read($, hasWindows),
       read($, compactAt),
@@ -551,7 +547,6 @@ export const register: Register = (on, options) => {
     ])
 
     const cacheNow = await readCache($, usage, nowMs).catch(() => undefined)
-    const oldest = inFlight[0]
     const lines = buildLines({
       model,
       effort: effortLevel,
@@ -563,7 +558,6 @@ export const register: Register = (on, options) => {
       hasWindows: accountHasWindows(isKnownSubscription, usage.rateLimits.length, cacheMark !== null),
       fiveHour: rateLimit('five_hour', usage.rateLimits, nowMs),
       sevenDay: rateLimit('seven_day', usage.rateLimits, nowMs),
-      running: oldest ? { label: oldest.label, startedAt: oldest.startedAt, count: inFlight.length } : undefined,
       showCost: isCostShown,
       showResetAt: isResetAtShown,
       cache: cacheNow,
@@ -629,8 +623,9 @@ export const register: Register = (on, options) => {
           }
           // The windows and their resets are split by the resets into several elements, so they
           // swap through the mod's state, all at once; each element only posts its click.
-          if (press === 'usage' || press === 'reset' || press === 'cache' || press === 'changes') {
+          if (press === 'settings' || press === 'usage' || press === 'reset' || press === 'cache' || press === 'changes') {
             const names = {
+              settings: ['settings-button', 'band-settings'],
               usage: ['usage-button', 'toggle-cost'],
               reset: ['reset-button', 'toggle-reset'],
               cache: ['cache-button', 'cache-details'],
@@ -673,6 +668,7 @@ export const register: Register = (on, options) => {
             />
           )
         }
+        if (press === 'settings') return <Button key="band-settings" plain label={label} onPress={() => void openSettings($, settings)} />
         if (press === 'model') return <Button key="open-model" plain label={label} onPress={() => void openModelPicker($)} />
         if (press === 'context-label') return <Button key="open-context" plain label={label} onPress={() => void openContext($)} />
         if (press === 'cache') return <Button key="cache-details" plain label={label} onPress={() => void showCacheDetails($)} />
@@ -718,6 +714,26 @@ export const register: Register = (on, options) => {
         </Text>
         {items.map((item, i) => (
           <Button key={item.action} hotkey={String(i + 1)} label={item.label} onPress={press => void runAction($, item, press.surface)} />
+        ))}
+      </Box>
+    )
+  })
+
+  on('ui.render', { component: 'Pane', requestId: SETTINGS_PANE }, async ($, e) => {
+    const { Box, Button } = $.ui.resolve(e)
+    const width = Math.max(...SETTING_ROWS.map(row => row.label.length)) + 2
+    // The terminal lines the values up in a column; the desktop collapses the spaces, so a colon parts them.
+    const label = (row: (typeof SETTING_ROWS)[number]) =>
+      e.surface === 'terminal' ? `${row.label.padEnd(width)}${settings[row.key]}` : `${row.label}: ${settings[row.key]}`
+    return (
+      <Box flexDirection="column">
+        {SETTING_ROWS.map((row, i) => (
+          <Button
+            key={row.key}
+            hotkey={String(i + 1)}
+            label={label(row)}
+            onPress={() => void changeSetting($, row.key, nextValue(row.key, settings[row.key]))}
+          />
         ))}
       </Box>
     )

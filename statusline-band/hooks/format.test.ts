@@ -101,28 +101,17 @@ test('projection by pace: none at or behind the time elapsed, or with nothing us
   expect(projectByPace(undefined, now + 4 * 3600_000, FIVE_HOUR_MS, now)).toBeUndefined()
 })
 
-test('the band shows the projection and the running tool', async () => {
+test('the band shows the projection', async () => {
   const now = Date.parse('2026-10-07T12:00:00Z')
-  const [l1, l2] = buildLines({
+  const [, l2] = buildLines({
     model: 'm',
     hasWindows: true,
     cwd: '/x',
     git: null,
     fiveHour: { percentUsed: 60, resetsAt: new Date(now + 2 * 3600_000).toISOString(), etaMs: 40 * 60_000 },
-    running: { label: 'PowerShell: Run calibration', startedAt: now - 134_000, count: 2 },
     nowMs: now,
   })
-  expect(text(l1)).toContain('▶ PowerShell: Run calibration 2m14s +1')
   expect(text(l2)).toContain('↺ 2h00m ⚠ 100% in 40m')
-})
-
-test('a tool call under two seconds stays off the band', async () => {
-  const now = Date.parse('2026-10-07T12:00:00Z')
-  const [l1] = buildLines({
-    model: 'm', cwd: '/x', git: null, hasWindows: false, nowMs: now,
-    running: { label: 'Read', startedAt: now - 500, count: 1 },
-  })
-  expect(text(l1)).not.toContain('▶')
 })
 
 test('model ids read as their names', async () => {

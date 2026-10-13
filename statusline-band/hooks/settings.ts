@@ -10,14 +10,13 @@ export type Settings = {
   /** `ask`: the countdown, and a prompt over a cold cache held with a question; `warn`: the
    *  countdown and a toast; `off`: neither. */
   cache: 'ask' | 'warn' | 'off'
-  /** The context and rate-limit thresholds and a long tool call ending: `critical` only the red ones. */
+  /** The context and rate-limit thresholds: `critical` only the red ones. */
   toasts: 'all' | 'critical' | 'off'
-  runningTool: boolean
 }
 
-export const DEFAULT_SETTINGS: Settings = { git: 'full', usage: 'auto', cache: 'ask', toasts: 'all', runningTool: true }
+export const DEFAULT_SETTINGS: Settings = { git: 'full', usage: 'auto', cache: 'ask', toasts: 'all' }
 
-const CHOICES = {
+export const CHOICES = {
   git: ['full', 'branch', 'off'],
   usage: ['auto', 'rate-limits', 'cost', 'off'],
   cache: ['ask', 'warn', 'off'],
@@ -37,8 +36,23 @@ export function readSettings(options: Readonly<Record<string, unknown>> = {}): S
     usage: pick(options, 'usage'),
     cache: pick(options, 'cache'),
     toasts: pick(options, 'toasts'),
-    runningTool: typeof options.runningTool === 'boolean' ? options.runningTool : DEFAULT_SETTINGS.runningTool,
   }
+}
+
+export type SettingKey = keyof typeof CHOICES
+
+// The settings menu's rows, in order, by the name the person reads.
+export const SETTING_ROWS: readonly { key: SettingKey; label: string }[] = [
+  { key: 'git', label: 'Git' },
+  { key: 'usage', label: 'Usage' },
+  { key: 'cache', label: 'Prompt cache' },
+  { key: 'toasts', label: 'Toasts' },
+]
+
+// A press on a row moves it to its next value, the last one back to the first.
+export function nextValue(key: SettingKey, current: string): string {
+  const choices: readonly string[] = CHOICES[key]
+  return choices[(choices.indexOf(current) + 1) % choices.length] ?? choices[0] ?? current
 }
 
 // The lowest level of a threshold that toasts: 1 orange and red, 2 red alone.

@@ -1,7 +1,7 @@
 {
   "name": "statusline-band",
-  "version": "0.19.0",
-  "description": "Colored band above the prompt: model and effort, git (with its diff and an operation under way), a folder menu, context, 5h/7d usage windows (or cost on an API account), prompt cache countdown, running tool and threshold toasts",
+  "version": "0.21.2",
+  "description": "Colored band above the prompt: model and effort, git (with its diff and an operation under way), a folder menu, a settings menu, context, 5h/7d usage windows (or cost on an API account), prompt cache countdown and threshold toasts",
   "author": { "name": "Francisco Corrêa Dias", "email": "fcdiass@gmail.com" },
   "types": "./types/index.d.ts",
   "userConfig": {
@@ -29,15 +29,9 @@
     "toasts": {
       "type": "string",
       "title": "Band: toasts",
-      "description": "Context and rate-limit thresholds, and a long tool call ending. critical: only the red thresholds",
+      "description": "Context and rate-limit thresholds. critical: only the red ones",
       "default": "all",
       "options": ["all", "critical", "off"]
-    },
-    "runningTool": {
-      "type": "boolean",
-      "title": "Band: running tool",
-      "description": "Show the tool call under way",
-      "default": true
     }
   }
 }
