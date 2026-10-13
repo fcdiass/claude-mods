@@ -2,11 +2,13 @@
 
 import { CACHE_ALERT_TOKENS, urgentLeadMs, warnLeadMs } from './cache'
 import type { CacheStatus } from './cache'
+import { DEFAULT_SETTINGS } from './settings'
+import type { Settings } from './settings'
 
 // `press` makes the segment interactive: `model` and `context-label` open /model and /context, `folder` shows and
 // copies the path, `usage` and `context` swap to the cost and the token count on a click, `reset` swaps the
 // reset countdowns for the clock time of the reset, `cache` toasts the prompt cache's details.
-export type Press = 'model' | 'folder' | 'usage' | 'context' | 'context-label' | 'reset' | 'cache'
+export type Press = 'model' | 'folder' | 'usage' | 'context' | 'context-label' | 'reset' | 'cache' | 'changes'
 export type Seg = { text: string; color?: string; bold?: boolean; dim?: boolean; underline?: boolean; press?: Press }
 
 export const C = {
@@ -30,7 +32,7 @@ export type StatusInput = {
   model: string
   effort?: string | null
   cwd: string
-  git: { repo: string; branch: string; changes?: number; ahead?: number; behind?: number } | null
+  git: { repo: string; branch: string; changes?: number; ahead?: number; behind?: number; conflicts?: number; operation?: string } | null
   contextPercent?: number
   /** Where auto-compaction runs, as a percentage of the context window; absent when it is off. */
   compactAtPercent?: number
@@ -46,6 +48,8 @@ export type StatusInput = {
   showResetAt?: boolean
   /** The main conversation's prompt cache; absent before its first model request. */
   cache?: CacheStatus
+  /** What /config shows of the band; the defaults when absent. */
+  settings?: Settings
   nowMs: number
 }
 
@@ -259,13 +263,13 @@ export function costAltSegs(costUsd: number | undefined): Seg[] {
 
 /**
  * Whether the account is one with 5h/7d windows, from what was known before and what the
- * engine reports now: windows mark it as one; a model response that came back without them
- * (the context's tokens are its figure) marks it as not, as when an API key replaces the
- * subscription; before any response nothing changes.
+ * engine reports now: windows mark it as one; a model response of this session that came back
+ * without them marks it as not, as when an API key replaces the subscription; before any
+ * response nothing changes (the context's tokens are no sign: the desktop counts them at once).
  */
-export function accountHasWindows(wasKnown: boolean, rateLimitCount: number, contextTokens: number | undefined): boolean {
+export function accountHasWindows(wasKnown: boolean, rateLimitCount: number, hasResponded: boolean): boolean {
   if (rateLimitCount > 0) return true
-  if (contextTokens !== undefined) return false
+  if (hasResponded) return false
   return wasKnown
 }
 
@@ -295,26 +299,40 @@ function windowsSegs(s: StatusInput): Seg[] {
   return shown.flatMap((segs, i) => (i === 0 ? segs : [SEP, ...segs]))
 }
 
+// The windows, which a click swaps for the cost, or the cost alone; `auto` picks by the account.
+function usageSegs(s: StatusInput, usage: Settings['usage']): Seg[] {
+  if (usage === 'off') return []
+  const hasWindows = usage === 'auto' ? s.hasWindows : usage === 'rate-limits'
+  if (!hasWindows) return [SEP, ...costSegs(s.costUsd)]
+  if (s.showCost) return [SEP, ...costAltSegs(s.costUsd).map(seg => ({ ...seg, press: 'usage' as const }))]
+  return [SEP, ...windowsSegs(s)]
+}
+
 export function buildLines(s: StatusInput): [Seg[], Seg[]] {
+  const settings = s.settings ?? DEFAULT_SETTINGS
+  const isFull = settings.git === 'full'
   const cwdN = s.cwd.replace(/\\/g, '/')
   const folder = cwdN.replace(/\/+$/, '').split('/').pop() || cwdN
 
-  const gitSegs: Seg[] = s.git
+  const gitSegs: Seg[] = s.git && settings.git !== 'off'
     ? [
         { text: '⎇  ', color: C.GR, press: 'folder' },
         { text: s.git.repo, color: C.GR, bold: true, press: 'folder' },
         { text: ':', dim: true, press: 'folder' },
         { text: s.git.branch, color: C.YL, press: 'folder' },
-        // Files changed, then commits not yet pushed and not yet pulled.
-        ...(s.git.changes ? [{ text: ` ●${s.git.changes}`, color: C.OR, press: 'folder' as const }] : []),
-        ...(s.git.ahead ? [{ text: ` ↑${s.git.ahead}`, color: C.CY, press: 'folder' as const }] : []),
-        ...(s.git.behind ? [{ text: ` ↓${s.git.behind}`, color: C.CY, press: 'folder' as const }] : []),
+        // An operation git left under way, and the files it left in conflict.
+        ...(s.git.operation ? [{ text: ` ${s.git.operation}`, color: C.RD, bold: true }] : []),
+        ...(s.git.conflicts ? [{ text: ` ✖${s.git.conflicts}`, color: C.RD }] : []),
+        // Files changed (a click shows their diff), then commits not yet pushed and not yet pulled.
+        ...(isFull && s.git.changes ? [{ text: ' ' }, { text: `●${s.git.changes}`, color: C.OR, press: 'changes' as const }] : []),
+        ...(isFull && s.git.ahead ? [{ text: ` ↑${s.git.ahead}`, color: C.CY }] : []),
+        ...(isFull && s.git.behind ? [{ text: ` ↓${s.git.behind}`, color: C.CY }] : []),
       ]
     : [{ text: `📁 ${folder}`, dim: true, press: 'folder' }]
 
   const runningMs = s.running ? s.nowMs - s.running.startedAt : 0
   const runningSegs: Seg[] =
-    s.running && runningMs >= RUNNING_SHOWN_AFTER_MS
+    settings.runningTool && s.running && runningMs >= RUNNING_SHOWN_AFTER_MS
       ? [
           SEP,
           { text: `▶ ${s.running.label} `, color: C.BL, bold: true },
@@ -341,13 +359,8 @@ export function buildLines(s: StatusInput): [Seg[], Seg[]] {
     ...contextBar(pct, s.compactAtPercent, ctxColor).map(seg => ({ ...seg, press: 'context' as const })),
     { text: ' ', press: 'context' },
     { text: `${pct}%`, color: ctxColor, press: 'context' },
-    ...(s.cache ? [{ text: ' ' }, { ...cacheSegs(s.cache), press: 'cache' as const }] : []),
-    SEP,
-    ...(!s.hasWindows
-      ? costSegs(s.costUsd)
-      : s.showCost
-        ? costAltSegs(s.costUsd).map(seg => ({ ...seg, press: 'usage' as const }))
-        : windowsSegs(s)),
+    ...(s.cache && settings.cache !== 'off' ? [{ text: ' ' }, { ...cacheSegs(s.cache), press: 'cache' as const }] : []),
+    ...usageSegs(s, settings.usage),
   ]
 
   return [line1, line2]

@@ -171,12 +171,12 @@ test('the context percentage rounds as /context does', async () => {
 
 test('the account is one with windows until a response comes back without them', async () => {
   // Windows reported: a subscription, whatever was known.
-  expect(accountHasWindows(false, 2, 1000)).toBe(true)
-  // No response yet in this window (fresh, or just compacted): what was known stands.
-  expect(accountHasWindows(true, 0, undefined)).toBe(true)
-  expect(accountHasWindows(false, 0, undefined)).toBe(false)
+  expect(accountHasWindows(false, 2, true)).toBe(true)
+  // No response yet this session, whatever context is counted: what was known stands.
+  expect(accountHasWindows(true, 0, false)).toBe(true)
+  expect(accountHasWindows(false, 0, false)).toBe(false)
   // A response with no windows: an API key or a gateway, so the cost comes back.
-  expect(accountHasWindows(true, 0, 1000)).toBe(false)
+  expect(accountHasWindows(true, 0, true)).toBe(false)
 })
 
 test('git shows files changed and commits ahead and behind, only when there are some', async () => {

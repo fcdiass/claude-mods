@@ -1,5 +1,33 @@
-/** The repository the session is in: its name, branch, files changed and commits ahead of/behind upstream. */
-export type GitInfo = { repo: string; branch: string; changes: number; ahead: number; behind: number }
+/**
+ * The repository the session is in: its name, branch, files changed and commits ahead of/behind
+ * upstream; an operation git left under way (`REBASING 2/5`, `MERGING`) and the files it left in
+ * conflict, when there is one.
+ */
+export type GitInfo = {
+  repo: string
+  branch: string
+  changes: number
+  ahead: number
+  behind: number
+  conflicts?: number
+  operation?: string
+}
+
+/** One file of the working tree's diff against HEAD: its hunks, cut to what the pane draws. */
+export type ChangedFile = {
+  path: string
+  status: 'A' | 'D' | 'M' | 'R'
+  added: number
+  removed: number
+  hunks: string
+  isBinary: boolean
+}
+
+/** The working tree's changes, as the changes pane shows them. */
+export type GitChanges = { files: ChangedFile[]; untracked: string[]; isCut: boolean }
+
+/** What the folder's menu can run on this machine. */
+export type HostTools = { platform: 'windows' | 'mac' | 'linux'; hasCode: boolean; hasWt: boolean }
 
 /** The prompt cache's time to live, as Claude Code names it. */
 export type CacheTtl = '5m' | '1h'
@@ -47,6 +75,12 @@ declare module 'claude-code' {
       ttlOverride: CacheTtl | null
       /** ai-memory's handoff skill is installed, so the cache toasts suggest it. */
       hasHandoff: boolean
+      /** A prompt held over a cold cache and handed back unsent: the same text sent again goes. */
+      heldPrompt: string | null
+      /** The changes pane's diff; null until it first opens. */
+      changes: GitChanges | null
+      /** The folder menu's programs, found the first time it opens. */
+      host: HostTools | null
     }
   }
 }

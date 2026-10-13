@@ -1,7 +1,17 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { cacheDetailsMessage, cacheExpiryMessage, coldPromptMessage } from './alerts'
+import {
+  COLD_COMPACT,
+  COLD_HANDOFF,
+  COLD_NEW,
+  COLD_SEND,
+  cacheDetailsMessage,
+  cacheExpiryMessage,
+  coldChoices,
+  coldCommands,
+  coldPromptMessage,
+} from './alerts'
 import { cacheStatus, cacheTtl, isExpiryDue, recordStep, ttlOverride } from './cache'
 import type { CacheStatus } from './cache'
 import { C, buildLines, cacheSegs } from './format'
@@ -119,6 +129,10 @@ test('the advice names ai-memory handoff only when it is installed', async () =>
 function engine(on: On) {
   const clock = mock.clock(on, { now: NOW })
   const toasts: string[] = []
+  // What the cold-cache dialog answers (undefined: Esc), the commands run and the box's fills.
+  const dialog: { answer?: string; questions: string[] } = { questions: [] }
+  const commands: string[] = []
+  const fills: string[] = []
   on('session.model', () => ({ value: 'claude-opus-5-5' }))
   on('session.cwd', () => ({ value: 'D:\\repo' }))
   on('session.usage', () => ({
@@ -137,13 +151,27 @@ function engine(on: On) {
     toasts.push(e.text)
     return { value: undefined }
   })
-  return { clock, toasts }
+  on('tool.call', { tool: 'AskUserQuestion' }, ($, e) => {
+    const [q] = (e as unknown as { questions: { question: string; options: { label: string }[] }[] }).questions
+    dialog.questions.push(`${q?.question} [${q?.options.map(o => o.label).join(' | ')}]`)
+    if (dialog.answer === undefined) return { deny: 'dismissed' }
+    return { result: { questions: [q], answers: { [q?.question ?? '']: dialog.answer } } } as never
+  })
+  on('command.run', ($, e) => {
+    commands.push(e.command)
+    return { text: '' }
+  })
+  on('prompt.fill', ($, e) => {
+    fills.push(e.text)
+    return { isFilled: true, box: { text: e.text, cursor: e.text.length } } as never
+  })
+  return { clock, toasts, dialog, commands, fills }
 }
 
 // A prompt typed at the terminal while the session is idle.
 const typed = (text: string) => ({ text, wait: false, origin: { kind: 'composer' as const } })
 
-test('a main-thread response starts the countdown; once it lapses a prompt toasts what it re-caches', async ($, on) => {
+test('a main-thread response starts the countdown, which a click details and which lapses cold', async ($, on) => {
   const { clock, toasts } = engine(on)
   const band = await $.ui.mount({ plugin: 'statusline-band', surface: 'terminal', ...BAND })
   expect(await band.find({ key: 'cache-button' })).toBeUndefined()
@@ -166,7 +194,99 @@ test('a main-thread response starts the countdown; once it lapses a prompt toast
   await band.redraw()
   expect(JSON.stringify(await band.drawn({ in: 'cache-button' }))).toContain('○ cold')
 
-  await $.prompt.submit(typed('cold'))
-  expect(toasts).toEqual(['Prompt cache was cold: this prompt re-caches 705k tokens. Next time, /compact before it lapses, or /clear for a new task'])
+  await band.unmount()
+})
+
+test('a prompt typed over a cold cache is held until the person picks', async ($, on) => {
+  const { clock, toasts, dialog, commands, fills } = engine(on)
+  const warmUp = async () => {
+    const stream = $.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', messageCount: 3 })
+    for await (const _ of stream);
+    await stream.result
+    await clock.advance(61 * MIN)
+  }
+  await warmUp()
+
+  // Sent as is: the dialog asked, nothing else happens.
+  dialog.answer = COLD_SEND
+  expect(await $.prompt.submit(typed('one'))).toEqual({ text: 'one' })
+  expect(dialog.questions).toEqual([
+    'Prompt cache is cold: sending this prompt re-caches 705k tokens. What now? [Send anyway | Compact first | New conversation]',
+  ])
+  expect(toasts).toEqual([])
+
+  // Compact first: held, compacted, back in the box; the stale mark goes, so no second ask.
+  dialog.answer = COLD_COMPACT
+  expect(await $.prompt.submit(typed('two'))).toEqual({ drop: 'Prompt held while the conversation compacts; it goes back to the prompt box' })
+  await clock.advance(1)
+  expect(commands).toEqual(['compact'])
+  expect(fills).toEqual(['two'])
+  expect(await $.prompt.submit(typed('two'))).toEqual({ text: 'two' })
+  expect(dialog.questions).toHaveLength(2)
+
+  // A new conversation: held, cleared, back in the box.
+  await warmUp()
+  dialog.answer = COLD_NEW
+  expect((await $.prompt.submit(typed('three'))).drop).toContain('new conversation')
+  await clock.advance(1)
+  expect(commands).toEqual(['compact', 'clear'])
+  expect(fills).toEqual(['two', 'three'])
+
+  // Esc: back in the box unsent; the same text again goes, with the toast.
+  await warmUp()
+  dialog.answer = undefined
+  expect((await $.prompt.submit(typed('four'))).drop).toContain('Enter sends it as is')
+  await clock.advance(1)
+  expect(commands).toEqual(['compact', 'clear'])
+  expect(fills).toEqual(['two', 'three', 'four'])
+  expect(await $.prompt.submit(typed('four'))).toEqual({ text: 'four' })
+  expect(toasts.splice(0)).toEqual(['Prompt cache was cold: this prompt re-caches 705k tokens. Next time, /compact before it lapses, or /clear for a new task'])
+
+  // A prompt the person did not type is never held.
+  const asked = dialog.questions.length
+  expect(await $.prompt.submit({ text: 'five', wait: false, origin: { kind: 'plugin', name: 'other' } } as never)).toEqual({ text: 'five' })
+  expect(dialog.questions).toHaveLength(asked)
+  expect(toasts).toHaveLength(1)
+})
+
+test('with ai-memory, a handoff precedes the new conversation', async () => {
+  expect(coldChoices(true)).toEqual([COLD_SEND, COLD_COMPACT, COLD_HANDOFF, COLD_NEW])
+  expect(coldCommands(COLD_HANDOFF)).toEqual(['ai-memory-handoff', 'clear'])
+  expect(coldCommands(COLD_SEND)).toBeUndefined()
+  expect(coldCommands('something typed')).toBeUndefined()
+})
+
+test('a known subscription keeps its windows until a response tells which it has', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  mock.store(on, { hasWindows: true })
+  // The desktop counts the context before any response; the windows come with the first one.
+  let rateLimits: { kind: string; percentUsed: number; resetsAt: string }[] = []
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  on('session.cwd', () => ({ value: 'D:\repo' }))
+  on('session.usage', () => ({
+    value: { startedAt: NOW, context: { tokens: 20_000, window: 1_000_000, percent: 2 }, rateLimits, cost: { usd: 0 } },
+  }))
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  on('turn.step', async function* () {
+    rateLimits = [{ kind: 'five_hour', percentUsed: 3, resetsAt: new Date(NOW + 2 * 3600_000).toISOString() }]
+    return { turnId: 't1', index: 0, answer: 'ok', toolUses: [], stopReason: 'end_turn', usage: usage(0, 20_000) } as never
+  })
+  on('ui.toast', () => ({ value: undefined }))
+
+  await $.session.start({ cwd: 'D:\repo', surface: 'desktop', isInteractive: true })
+  const band = await $.ui.mount({ plugin: 'statusline-band', surface: 'desktop', ...BAND })
+  const drawn = async () => JSON.stringify(await band.drawn())
+  expect(await drawn()).not.toContain('$0.00')
+  expect(await drawn()).toContain('5h')
+  expect(await drawn()).toContain('7d')
+
+  const stream = $.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', messageCount: 3 })
+  for await (const _ of stream);
+  await stream.result
+  await band.redraw()
+  // A plan with a 5h window alone: the 7d leaves, the cost stays away.
+  expect(await drawn()).toContain('5h')
+  expect(await drawn()).not.toContain('7d')
+  expect(await drawn()).not.toContain('$0.00')
   await band.unmount()
 })

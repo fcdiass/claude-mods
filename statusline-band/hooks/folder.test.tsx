@@ -35,20 +35,42 @@ function engine(on: On, isCopied = true, rateLimits: typeof WINDOWS = []) {
   return { copied, toasts }
 }
 
-test('the folder shows its name, and its full path under the pointer', async ($, on) => {
+test('the folder shows its name, and its full path with the pointer over its icon', async ($, on) => {
   engine(on)
   const band = await $.ui.mount({ plugin: 'statusline-band', surface: 'terminal', ...BAND })
   const drawnText = async () => JSON.stringify(await band.drawn({ in: 'folder-button' }))
+  const path = JSON.stringify(CWD).slice(1, -1)
   expect(await drawnText()).toContain('📁 claude-mods')
 
-  await band.pointer({ type: 'enter', x: 0, y: 0, in: 'folder-button' })
-  expect(await drawnText()).toContain(JSON.stringify(CWD).slice(1, -1))
+  // Over the name: nothing changes.
+  await band.pointer({ type: 'enter', x: 5, y: 0, in: 'folder-button' })
+  await band.pointer({ type: 'move', x: 6, y: 0, in: 'folder-button' })
+  expect(await drawnText()).toContain('📁 claude-mods')
 
+  // Onto the icon: the path; back to the name, and out: the name.
+  await band.pointer({ type: 'move', x: 1, y: 0, in: 'folder-button' })
+  expect(await drawnText()).toContain(path)
+  await band.pointer({ type: 'move', x: 6, y: 0, in: 'folder-button' })
+  expect(await drawnText()).toContain('📁 claude-mods')
+  await band.pointer({ type: 'enter', x: 0, y: 0, in: 'folder-button' })
+  expect(await drawnText()).toContain(path)
   await band.pointer({ type: 'leave', x: -1, y: 0, in: 'folder-button' })
   expect(await drawnText()).toContain('📁 claude-mods')
 })
 
-test('a click copies the full path and says so', async ($, on) => {
+test('a click on the name copies nothing', async ($, on) => {
+  const { copied, toasts } = engine(on)
+  const band = await $.ui.mount({ plugin: 'statusline-band', surface: 'terminal', ...BAND })
+  await band.pointer({ type: 'down', x: 6, y: 0, button: 'left', in: 'folder-button' })
+  await band.pointer({ type: 'up', x: 6, y: 0, button: 'left', in: 'folder-button' })
+  // Pressed on the icon, released on the name: dropped, as a button does.
+  await band.pointer({ type: 'down', x: 1, y: 0, button: 'left', in: 'folder-button' })
+  await band.pointer({ type: 'up', x: 6, y: 0, button: 'left', in: 'folder-button' })
+  expect(copied).toEqual([])
+  expect(toasts).toEqual([])
+})
+
+test('a click on the icon copies the full path and says so', async ($, on) => {
   const { copied, toasts } = engine(on)
   const band = await $.ui.mount({ plugin: 'statusline-band', surface: 'terminal', ...BAND })
   await band.pointer({ type: 'down', x: 1, y: 0, button: 'left', in: 'folder-button' })
@@ -110,7 +132,7 @@ test('a click on the context bar swaps the percentage for tokens, another swaps 
   expect(await ctxText()).toContain('36%')
 })
 
-test('on the desktop the folder does not swap under the pointer; a click copies and the toast shows the path', async ($, on) => {
+test('on the desktop the folder does not swap under the pointer; a click on the icon copies and the toast shows the path', async ($, on) => {
   const { copied, toasts } = engine(on)
   const band = await $.ui.mount({ plugin: 'statusline-band', surface: 'desktop', ...BAND })
   const drawnText = async () => JSON.stringify(await band.drawn({ in: 'folder-button' }))

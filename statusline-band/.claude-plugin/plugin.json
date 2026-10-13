@@ -1,7 +1,43 @@
 {
   "name": "statusline-band",
-  "version": "0.16.5",
-  "description": "Colored band above the prompt: model and effort, git, context, 5h/7d usage windows (or cost on an API account), prompt cache countdown, running tool and threshold toasts",
+  "version": "0.19.0",
+  "description": "Colored band above the prompt: model and effort, git (with its diff and an operation under way), a folder menu, context, 5h/7d usage windows (or cost on an API account), prompt cache countdown, running tool and threshold toasts",
   "author": { "name": "Francisco Corrêa Dias", "email": "fcdiass@gmail.com" },
-  "types": "./types/index.d.ts"
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "git": {
+      "type": "string",
+      "title": "Band: git",
+      "description": "full: branch, files changed (a click shows the diff), ahead/behind, an operation under way. branch: the branch and an operation under way. off: the folder alone",
+      "default": "full",
+      "options": ["full", "branch", "off"]
+    },
+    "usage": {
+      "type": "string",
+      "title": "Band: usage",
+      "description": "auto: the 5h/7d rate limits on a subscription, the cost on an API account. rate-limits or cost: always that one. off: neither",
+      "default": "auto",
+      "options": ["auto", "rate-limits", "cost", "off"]
+    },
+    "cache": {
+      "type": "string",
+      "title": "Band: prompt cache",
+      "description": "ask: the countdown, and a prompt over a cold cache is held with a question. warn: the countdown and a toast. off: neither",
+      "default": "ask",
+      "options": ["ask", "warn", "off"]
+    },
+    "toasts": {
+      "type": "string",
+      "title": "Band: toasts",
+      "description": "Context and rate-limit thresholds, and a long tool call ending. critical: only the red thresholds",
+      "default": "all",
+      "options": ["all", "critical", "off"]
+    },
+    "runningTool": {
+      "type": "boolean",
+      "title": "Band: running tool",
+      "description": "Show the tool call under way",
+      "default": true
+    }
+  }
 }

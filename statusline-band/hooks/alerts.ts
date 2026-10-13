@@ -69,6 +69,38 @@ export function coldPromptMessage(tokens: number, hasHandoff: boolean): string {
   return `Prompt cache was cold: this prompt re-caches ${fmtTokens(tokens)} tokens. ${next}`
 }
 
+// A prompt typed over a cold cache is held and this asked: send it, or shrink or leave the
+// conversation first. The choices are the dialog's labels; Esc or a typed answer sends nothing.
+export const COLD_SEND = 'Send anyway'
+export const COLD_COMPACT = 'Compact first'
+export const COLD_HANDOFF = 'Handoff, then new'
+export const COLD_NEW = 'New conversation'
+
+export function coldQuestion(tokens: number): string {
+  return `Prompt cache is cold: sending this prompt re-caches ${fmtTokens(tokens)} tokens. What now?`
+}
+
+export function coldChoices(hasHandoff: boolean): string[] {
+  return hasHandoff ? [COLD_SEND, COLD_COMPACT, COLD_HANDOFF, COLD_NEW] : [COLD_SEND, COLD_COMPACT, COLD_NEW]
+}
+
+// The commands a choice runs before the prompt goes back to the box; undefined for an answer
+// that runs none (Esc, a typed answer).
+export function coldCommands(choice: string): string[] | undefined {
+  if (choice === COLD_COMPACT) return ['compact']
+  if (choice === COLD_HANDOFF) return [HANDOFF_SKILL, 'clear']
+  if (choice === COLD_NEW) return ['clear']
+  return undefined
+}
+
+// The line the held prompt leaves in place of the turn.
+export function heldMessage(choice: string | undefined): string {
+  if (choice === COLD_COMPACT) return 'Prompt held while the conversation compacts; it goes back to the prompt box'
+  if (choice === COLD_HANDOFF) return 'Prompt held for a handoff and a new conversation; it goes back to the prompt box'
+  if (choice === COLD_NEW) return 'Prompt held for a new conversation; it goes back to the prompt box'
+  return 'Prompt held over a cold cache and put back in the prompt box; Enter sends it as is'
+}
+
 // A click on the cache's countdown: its state, when it lapses, its size and how well it served.
 export function cacheDetailsMessage(c: CacheStatus, nowMs: number): string {
   const at = new Date(nowMs + c.remainingMs)
@@ -88,11 +120,13 @@ export function cacheDetailsMessage(c: CacheStatus, nowMs: number): string {
 export function climb(
   previous: Readonly<Record<string, number>>,
   current: Readonly<Record<string, Gauge>>,
+  minLevel = 1,
 ): { toasts: string[]; levels: Record<string, number> } {
   const toasts: string[] = []
   const levels: Record<string, number> = {}
   for (const [key, gauge] of Object.entries(current)) {
-    if (gauge.level > (previous[key] ?? 0)) toasts.push(gauge.message)
+    // Below `minLevel` a climb is remembered without a toast.
+    if (gauge.level > (previous[key] ?? 0) && gauge.level >= minLevel) toasts.push(gauge.message)
     levels[key] = gauge.level
   }
   return { toasts, levels }
