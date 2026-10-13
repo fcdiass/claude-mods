@@ -1,6 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import { C, accountHasWindows, bar, buildLines, fmtResetAt, contextAltSegs, costAltSegs, fmtTokens, fmtDuration, fmtReset, FIVE_HOUR_MS, SEVEN_DAY_MS, modelName, projectByPace, rateLimitColor } from './format'
+import { DEFAULT_SETTINGS } from './settings'
 
 const text = (segs: { text: string }[]) => segs.map(s => s.text).join('')
 
@@ -171,8 +172,10 @@ test('the account is one with windows until a response comes back without them',
 test('git shows files changed and commits ahead and behind, only when there are some', async () => {
   const now = Date.parse('2026-10-07T12:00:00Z')
   const base = { model: 'm', cwd: '/x', hasWindows: false, nowMs: now }
-  const [dirty] = buildLines({ ...base, git: { repo: 'repo', branch: 'main', changes: 3, ahead: 1, behind: 2 } })
-  expect(text(dirty)).toContain('repo:main ●3 ↑1 ↓2')
+  const [dirty] = buildLines({ ...base, git: { repo: 'repo', branch: 'main', changes: 3, ahead: 1, behind: 2, stashes: 1 } })
+  expect(text(dirty)).toContain('repo:main ●3 ↑1 ↓2 ≡1')
+  const [branchOnly] = buildLines({ ...base, settings: { ...DEFAULT_SETTINGS, git: 'branch' }, git: { repo: 'repo', branch: 'main', stashes: 1 } })
+  expect(text(branchOnly).endsWith('repo:main')).toBe(true)
   const [clean] = buildLines({ ...base, git: { repo: 'repo', branch: 'main', changes: 0, ahead: 0, behind: 0 } })
   expect(text(clean).endsWith('repo:main')).toBe(true)
 })

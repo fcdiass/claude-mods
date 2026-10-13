@@ -13,12 +13,17 @@ test('a branch with changes and an upstream ahead and behind', async () => {
     '? hooks/git.ts',
     '',
   ].join('\r\n')
-  expect(parseGitStatus(stdout)).toEqual({ branch: 'develop', changes: 3, ahead: 2, behind: 1, conflicts: 0 })
+  expect(parseGitStatus(stdout)).toEqual({ branch: 'develop', changes: 3, ahead: 2, behind: 1, stashes: 0, conflicts: 0 })
 })
 
 test('a clean branch with no upstream', async () => {
   const stdout = '# branch.oid 267267a42b23ebeb960dec01545e1d6850120bb5\n# branch.head main\n'
-  expect(parseGitStatus(stdout)).toEqual({ branch: 'main', changes: 0, ahead: 0, behind: 0, conflicts: 0 })
+  expect(parseGitStatus(stdout)).toEqual({ branch: 'main', changes: 0, ahead: 0, behind: 0, stashes: 0, conflicts: 0 })
+})
+
+test('the stashes kept, which git lists only when there are some', async () => {
+  const stdout = '# branch.oid 267267a42b23ebeb960dec01545e1d6850120bb5\n# branch.head main\n# stash 2\n'
+  expect(parseGitStatus(stdout)).toMatchObject({ stashes: 2, changes: 0 })
 })
 
 test('a detached HEAD reads as its short sha', async () => {

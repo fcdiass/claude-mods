@@ -30,7 +30,16 @@ export type StatusInput = {
   model: string
   effort?: string | null
   cwd: string
-  git: { repo: string; branch: string; changes?: number; ahead?: number; behind?: number; conflicts?: number; operation?: string } | null
+  git: {
+    repo: string
+    branch: string
+    changes?: number
+    ahead?: number
+    behind?: number
+    stashes?: number
+    conflicts?: number
+    operation?: string
+  } | null
   contextPercent?: number
   /** Where auto-compaction runs, as a percentage of the context window; absent when it is off. */
   compactAtPercent?: number
@@ -317,10 +326,12 @@ export function buildLines(s: StatusInput): [Seg[], Seg[]] {
         // An operation git left under way, and the files it left in conflict.
         ...(s.git.operation ? [{ text: ` ${s.git.operation}`, color: C.RD, bold: true }] : []),
         ...(s.git.conflicts ? [{ text: ` ✖${s.git.conflicts}`, color: C.RD }] : []),
-        // Files changed (a click shows their diff), then commits not yet pushed and not yet pulled.
+        // Files changed (a click shows their diff), commits not yet pushed and not yet pulled, then
+        // the stashes kept, quiet: a reminder, not a state of the branch.
         ...(isFull && s.git.changes ? [{ text: ' ' }, { text: `●${s.git.changes}`, color: C.OR, press: 'changes' as const }] : []),
         ...(isFull && s.git.ahead ? [{ text: ` ↑${s.git.ahead}`, color: C.CY }] : []),
         ...(isFull && s.git.behind ? [{ text: ` ↓${s.git.behind}`, color: C.CY }] : []),
+        ...(isFull && s.git.stashes ? [{ text: ` ≡${s.git.stashes}`, dim: true }] : []),
       ]
     : // The icon apart from the name: the name inverts under the pointer, the icon shows the path.
       [

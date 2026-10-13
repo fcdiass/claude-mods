@@ -2,7 +2,7 @@
 // and how the prompt cache and the thresholds speak up. The defaults are the band as it always was.
 
 export type Settings = {
-  /** `full`: branch, files changed (with their diff), ahead/behind, an operation under way and its
+  /** `full`: branch, files changed (with their diff), ahead/behind, stashes, an operation under way and its
    *  conflicts; `branch`: the branch and an operation under way with its conflicts; `off`: the folder alone. */
   git: 'full' | 'branch' | 'off'
   /** `auto`: the 5h/7d rate limits on a subscription, the cost on an API account. */

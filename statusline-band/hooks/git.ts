@@ -1,13 +1,14 @@
-// Reading `git status --porcelain=v2 --branch`: the branch, the files changed, and the commits
-// ahead of and behind its upstream.
+// Reading `git status --porcelain=v2 --branch --show-stash`: the branch, the files changed, the
+// commits ahead of and behind its upstream, and the stashes kept.
 
-export type GitStatus = { branch: string; changes: number; ahead: number; behind: number; conflicts: number }
+export type GitStatus = { branch: string; changes: number; ahead: number; behind: number; stashes: number; conflicts: number }
 
 export function parseGitStatus(stdout: string): GitStatus {
   let head = ''
   let oid = ''
   let ahead = 0
   let behind = 0
+  let stashes = 0
   let changes = 0
   let conflicts = 0
   for (const line of stdout.split(/\r?\n/)) {
@@ -18,6 +19,9 @@ export function parseGitStatus(stdout: string): GitStatus {
       const ab = /\+(\d+) -(\d+)/.exec(line)
       ahead = Number(ab?.[1] ?? 0)
       behind = Number(ab?.[2] ?? 0)
+    } else if (line.startsWith('# stash ')) {
+      // Only when there is one: `# stash 2`.
+      stashes = Number(line.slice('# stash '.length)) || 0
     } else if (!line.startsWith('#')) {
       changes += 1
       // `u`: a file a merge, rebase or cherry-pick left in conflict.
@@ -26,7 +30,7 @@ export function parseGitStatus(stdout: string): GitStatus {
   }
   // A detached HEAD reads as its short sha, as `rev-parse --short` gives it.
   const branch = head === '(detached)' ? `#${oid.slice(0, 7)}` : head
-  return { branch, changes, ahead, behind, conflicts }
+  return { branch, changes, ahead, behind, stashes, conflicts }
 }
 
 export type GitOperation = { operation: string; branch?: string }

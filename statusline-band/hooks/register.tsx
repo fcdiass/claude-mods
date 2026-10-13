@@ -72,7 +72,7 @@ async function readGit($: EngineInterface, cwd: string): Promise<GitInfo | null>
     const root = await run('rev-parse', '--show-toplevel', '--absolute-git-dir')
     if (root.exitCode !== 0) return null
     const [top = '', gitDir = ''] = root.stdout.trim().split(/\r?\n/)
-    const status = await run('status', '--porcelain=v2', '--branch')
+    const status = await run('status', '--porcelain=v2', '--branch', '--show-stash')
     if (status.exitCode !== 0) return null
     const repo = top.replace(/\\/g, '/').split('/').pop() ?? ''
     const reader = { exists: (path: string) => $.fs.exists(path), read: (path: string) => $.fs.read(path) as Promise<string> }

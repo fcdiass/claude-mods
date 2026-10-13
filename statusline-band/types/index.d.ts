@@ -1,6 +1,6 @@
 /**
  * The repository the session is in: its name, branch, files changed and commits ahead of/behind
- * upstream; an operation git left under way (`REBASING 2/5`, `MERGING`) and the files it left in
+ * upstream, the stashes kept; an operation git left under way (`REBASING 2/5`, `MERGING`) and the files it left in
  * conflict, when there is one.
  */
 export type GitInfo = {
@@ -9,6 +9,7 @@ export type GitInfo = {
   changes: number
   ahead: number
   behind: number
+  stashes?: number
   conflicts?: number
   operation?: string
 }
